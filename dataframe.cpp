@@ -17,7 +17,7 @@ std::vector<std::vector<double>> dataframe(const std::string& filename) {
 
         ch = file.peek();
 
-        if (ch == ",") {
+        if (ch == "," || ch == " ") {
             file.ignore();
         } else if (ch == "\n" || ch == "\r" || file.eof()) {
             dataFrame.push_back(row);
