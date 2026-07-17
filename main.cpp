@@ -71,8 +71,9 @@ std::vector<std::vector<double>> hiddenLayer(
 }
 
 int main() { 
-    //csv file turned to matrix of vectors of doubles
+     //csv file turned to matrix of vectors of doubles
     std::vector<std::vector<double>> dataFrame = dataframe("data.csv");
+
     //create a target vector
     std::vector<double> targets;
     targets.reserve(dataFrame.size());
@@ -80,62 +81,7 @@ int main() {
         targets.push_back(dataFrame[i].back());
         dataFrame[i].pop_back();
     }
-    // IDEA IN DEV !! std::vector<int> hiddenLayerSizes = {2, 3, 3, 4};
-    Layer test_layer = createLayer(4, 2);
-    //Output of each hidden layer to be passed to the next layer as input
-    std::vector<double> hiddenLayerOutputs;
 
-  //===============Feedforward Test==========//
-  std::cout << std::endl << "Feedforward Test" << std::endl;
-  for (auto& row: dataFrame) {
-    for (std::size_t index = 0; index < test_layer.weights.size(); ++index) {
-        hiddenLayerOutputs.push_back(feedForward(row, test_layer, index));
-    }
-  }
-
-
-  //check the output of the feedforward function
-  std::cout << "Feedforward Output:" << std::endl;
-  for (const auto& val: hiddenLayerOutputs) {
-      std::cout << val << " ";
-  }
-  std::cout << std::endl;
-
-  //===============Layer creation Test==========//
-  std::cout << std::endl << "Layer creation Test" << std::endl;
-  for (const auto& row: test_layer.weights) {
-    for (const auto& val: row) {
-        std::cout << val << " ";
-    }
-    std::cout << std::endl;
-  }
-
-  for (auto& val: test_layer.biases) {
-    std::cout << val << std::endl;
-  }
-  //===============File Read test==========//
-  std::cout << "File Read test" << std::endl;
-  std::cout << "Predictors" << std::endl;
-  for (const auto& row: dataFrame) {
-      for (const auto& val: row) {
-          std::cout << val << " ";
-      }
-      std::cout << std::endl;
-  }
-  std::cout << "Targets" << std::endl;
-  for (const auto& val: targets) {
-        std::cout << val << std::endl;
-    }
-
-  //===============Hidden Layer Testt==========//
-  std::cout << "Hidden Layer Test" << std::endl;
-  for (const auto& row: hiddenLayer(test_layer, dataFrame)) {
-    for (const auto& val: row) {
-        std::cout << val << " ";
-    }
-    std::cout << std::endl;
-  }
-  
   return 0;
 }
 
