@@ -4,7 +4,7 @@
 #include "dataframe.h"
 #include "network.h"
 
-int main() { 
+int main()  
     const std::vector<std::size_t> layerSizes = {3, 2, 4, 1};
     std::vector<Layer> network = createNetwork(layerSizes);
     
