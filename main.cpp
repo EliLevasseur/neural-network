@@ -3,13 +3,14 @@
 #include <vector>
 #include "dataframe.h"
 #include "network.h"
+#include "training.h"
 
 int main() { 
     const std::vector<std::size_t> layerSizes = {3, 2, 4, 1};
     std::vector<Layer> network = createNetwork(layerSizes);
     
     // Csv file turned to matrix of vectors of doubles
-    std::vector<std::vector<double>> dataFrame = dataframe("data.csv");
+    std::vector<std::vector<double>> dataFrame = dataframe("binary_test.csv");
 
     // Finish returning a dataframe not just a vector for testing with one output node
     std::vector<std::vector<double>> predictions;
@@ -41,6 +42,11 @@ int main() {
         std::cout << "]" << std::endl;
     }
     std::cout << "]" << std::endl;
+    
+    Trainer trainer(predictions, targets);
+    trainer.binaryCrossEntropy();
+    trainer.averageLoss();
+    trainer.getDeltas();
 
     return 0;
 }
