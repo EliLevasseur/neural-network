@@ -30,6 +30,12 @@ int main() {
     for (const auto& row: dataFrame) {
         predictions.push_back(forwardNetwork(row, network));
     }
+    
+    // TEST FOR ACTIVATIONS FOR THE FIRST ROW OF DATAFRAME
+    std::vector<std::vector<double>> activations = forwardActivations(dataFrame[0], network);
+    for (auto size : activations) {
+        std::cout << size.size() << std::endl;
+    }
 
     // TEST FOR DEMO NETWORK WITH NO BACKPROPOGATION
     std::cout << "[" << std::endl;
@@ -42,11 +48,13 @@ int main() {
         std::cout << "]" << std::endl;
     }
     std::cout << "]" << std::endl;
-    
-    Trainer trainer(predictions, targets);
-    trainer.binaryCrossEntropy();
-    trainer.averageLoss();
-    trainer.getDeltas();
+   
+    // Just some simple pointer aura farming.
+    Trainer* trainer = new Trainer(predictions, targets);
+    trainer->binaryCrossEntropy();
+    trainer->averageLoss();
+    trainer->getDeltas();
+    delete trainer;
 
     return 0;
 }

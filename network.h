@@ -25,4 +25,8 @@ std::vector<double> forwardNetwork(
     const std::vector<Layer> network
 );
 
+std::vector<std::vector<double>> forwardActivations(
+    const std::vector<double>& inputs,
+    const std::vector<Layer> network
+);
 #endif

@@ -1,11 +1,19 @@
 #include "training.h"
-#include <cmath>
-#include <iostream>
+#include "network.h"
 
 // Make a constructor function to create trainer objects.
-Trainer::Trainer(const std::vector<std::vector<double>>& predictions, const std::vector<double>& targets) {
+Trainer::Trainer(
+	const std::vector<std::vector<double>>& predictions,
+	const std::vector<double>& targets,
+	const int learningRate,
+	std::vector<Layer> network
+	std::vector<std::vector<double>> activations;
+) {
 	this->predictions = predictions;
 	this->targets = targets;
+	this->learningRate = learningRate;
+	this->network = network;
+	this->activations = activations;
 }
 
 
@@ -13,6 +21,7 @@ Trainer::Trainer(const std::vector<std::vector<double>>& predictions, const std:
 void Trainer::binaryCrossEntropy() {
 	loss.clear();
 	loss.reserve(targets.size());
+
 
 	for (size_t i = 0; i < predictions.size(); i++) {
 		loss.push_back(-(targets[i] * std::log(predictions[i][0]) + (1 - targets[i]) * std::log(1 - predictions[i][0])));
@@ -28,13 +37,40 @@ void Trainer::averageLoss() {
 	return ;
 }
 
-void Trainer::getDeltas() {
+void Trainer::getDeltas(double target) {
       	deltas.clear();
-      	deltas.reserve(targets.size());
+      	deltas.resize(network.size());
+	double outputDelta = activations.back().back() - target;
+	deltas.back().push_back(outputDelta);
       
-	for (size_t i = 0; i < targets.size(); i++) {
-      		deltas.push_back(predictions[i][0] - targets[i]);
+	for (int layer = network.size() - 2; layer >= 0; layer--) {
+      		for (std::size_t node = 0; node < network[layer].weights.size(); node++) {
+			double x = 0;
+			if (layer == network.size() - 2) {
+				x = outputDelta * network[layer + 1].weights[0][node];			}
+		 	else {
+				for (std::size_t weight = 0; weight < network[layer + 1].weights.size(); weight++) {
+					x += network[layer + 1].weights[weight][node] * deltas[layer + 1][weight];
+					}
+			}
+			deltas[layer].push_back(activations[layer + 1][node]* (1 - activations[layer + 1][node]) * x);
+		}
 	}
 	return ;
 }
+
+void Trainer::getWeightGradients() {
+	weightGradients.clear();
+	weightGradients.resize(network.size());
+	for (size_t x = 0; x < network.size(); ++x) {
+		weightGradients[x].resize(network[x].weights.size());
+      		for (size_t i = 0; i < network[x].weights.size(); ++i) {
+	     		weightGradients[x][i].resize(network[x].weights[i].size());
+      			for (size_t j = 0; j < network[x].weights[i].size(); ++j) {
+      				weightGradients[x][i][j] = (deltas[x][i]* activations[x][j]);
+      				}
+			}
+		}
+	}
+
 

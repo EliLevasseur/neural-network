@@ -70,3 +70,17 @@ std::vector<double> forwardNetwork(const std::vector<double>& inputs, const std:
     }
     return currentOutputs;
 }
+
+std::vector<std::vector<double>> forwardActivations(const std::vector<double>& inputs, const std::vector<Layer> network) {
+    std::vector<double> currentOutputs = inputs;
+    std::vector<std::vector<double>> activations;
+    activations.reserve(network.size() + 1);
+    activations.push_back(inputs);
+
+    for (const Layer& layer: network) {
+         currentOutputs = feedForward(currentOutputs, layer);
+         activations.push_back(currentOutputs);
+    }
+    return activations;
+}
+
