@@ -5,7 +5,8 @@
 #include "network.h"
 #include "training.h"
 
-int main() { 
+
+int main() {
     const std::vector<std::size_t> layerSizes = {3, 2, 4, 1};
     std::vector<Layer> network = createNetwork(layerSizes);
     
@@ -51,9 +52,8 @@ int main() {
    
     // Just some simple pointer aura farming.
     Trainer* trainer = new Trainer(predictions, targets);
-    trainer->binaryCrossEntropy();
-    trainer->averageLoss();
     trainer->getDeltas();
+    trainer->getWeightGradients();
     delete trainer;
 
     return 0;

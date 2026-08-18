@@ -4,8 +4,16 @@
 #include <string>
 #include <vector>
 
-std::vector<std::vector<double>> dataframe(
-    const std::string& filename
-);
+class DataFrame {
+    public :
+        DataFrame();
+        DataFrame~();
+        DataFrame(const std::string& filename));
 
+        std::vector<std::vector<double>> getDataFrame();
+
+    private:
+        std::vector<std::vector<double>> dataFrame;
+};
+              
 #endif

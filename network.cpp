@@ -13,7 +13,7 @@ double netSummation(const std::vector<double>& inputs, const Layer& layer, int w
     return output + layer.biases[weightIndex];
 }
 
-double sigmoid(double x) {
+double sigmoid(double& x) {
     x = 1.0/(1.0 + std::exp(-x));
     return x;
 }
@@ -60,7 +60,7 @@ std::vector<double> feedForward(const std::vector<double>& inputs, const Layer& 
     return output;
 }
 
-std::vector<double> forwardNetwork(const std::vector<double>& inputs, const std::vector<Layer> network) {
+std::vector<double> forwardNetwork(const std::vector<double>& inputs, const std::vector<Layer>& network) {
     // Connect the neural network together by applying all activation functions and combination functions
     // of each layer to the original input row to get a prediction matrix.
     std::vector<double> currentOutputs = inputs;
@@ -71,7 +71,7 @@ std::vector<double> forwardNetwork(const std::vector<double>& inputs, const std:
     return currentOutputs;
 }
 
-std::vector<std::vector<double>> forwardActivations(const std::vector<double>& inputs, const std::vector<Layer> network) {
+std::vector<std::vector<double>> forwardActivations(const std::vector<double>& inputs, const std::vector<Layer>& network) {
     std::vector<double> currentOutputs = inputs;
     std::vector<std::vector<double>> activations;
     activations.reserve(network.size() + 1);

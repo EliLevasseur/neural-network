@@ -2,39 +2,20 @@
 #include "network.h"
 
 // Make a constructor function to create trainer objects.
+//template <class T>
 Trainer::Trainer(
 	const std::vector<std::vector<double>>& predictions,
 	const std::vector<double>& targets,
 	const int learningRate,
-	std::vector<Layer> network
-	std::vector<std::vector<double>> activations;
+	std::vector<Layer>& network
+	std::vector<std::vector<double>>& activations
 ) {
 	this->predictions = predictions;
 	this->targets = targets;
 	this->learningRate = learningRate;
 	this->network = network;
 	this->activations = activations;
-}
 
-
-// Because I am testing the network with binary targets for now we calculate loss using cross entropy.
-void Trainer::binaryCrossEntropy() {
-	loss.clear();
-	loss.reserve(targets.size());
-
-
-	for (size_t i = 0; i < predictions.size(); i++) {
-		loss.push_back(-(targets[i] * std::log(predictions[i][0]) + (1 - targets[i]) * std::log(1 - predictions[i][0])));
-	}
-	return ;
-}
-
-void Trainer::averageLoss() {
-	double avg = 0;
-	for (auto i: loss) {avg += i;}
-	avg /= loss.size();
-	std::cout << avg << std::endl;
-	return ;
 }
 
 void Trainer::getDeltas(double target) {
@@ -56,18 +37,18 @@ void Trainer::getDeltas(double target) {
 			deltas[layer].push_back(activations[layer + 1][node]* (1 - activations[layer + 1][node]) * x);
 		}
 	}
-	return ;
 }
 
 void Trainer::getWeightGradients() {
+
 	weightGradients.clear();
 	weightGradients.resize(network.size());
-	for (size_t x = 0; x < network.size(); ++x) {
-		weightGradients[x].resize(network[x].weights.size());
-      		for (size_t i = 0; i < network[x].weights.size(); ++i) {
+	for (size_t layer = 0; layer < network.size(); layer++) {
+		weightGradients[layer].resize(network[layer].weights.size());
+      		for (size_t node = 0; node < network[layer].weights.size(); node++) {
 	     		weightGradients[x][i].resize(network[x].weights[i].size());
-      			for (size_t j = 0; j < network[x].weights[i].size(); ++j) {
-      				weightGradients[x][i][j] = (deltas[x][i]* activations[x][j]);
+      			for (size_t input = 0; input < network[layer].weights[node].size(); input) {
+      				weightGradients[layer][node][input] = (deltas[layer][node] * activations[layer][input]);
       				}
 			}
 		}

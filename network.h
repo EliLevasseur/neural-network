@@ -16,17 +16,17 @@ std::vector<Layer> createNetwork(
 
 double netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex);
 
-double sigmoid(double x);
+double sigmoid(double& x);
 
 std::vector<double> feedForward(const std::vector<double>& inputs, const Layer& layer); 
 
 std::vector<double> forwardNetwork(
     const std::vector<double>& inputs,
-    const std::vector<Layer> network
+    const std::vector<Layer>& network
 );
 
 std::vector<std::vector<double>> forwardActivations(
     const std::vector<double>& inputs,
-    const std::vector<Layer> network
+    const std::vector<Layer>& network
 );
 #endif
