@@ -8,25 +8,33 @@ struct Layer {
     std::vector<double> biases;
 };
 
-Layer createLayer(int inputs, int nodes);
+class Network {
+    public :
+        // Constructors
+        Network(std::vector<std::size_t> layerSizes);
+    
+        // GETTERS
+        const std::vector<std::vector<double>>& getActivations(const std::vector<double>& inputs);
+        std::vector<Layer>& getNetwork();
 
-std::vector<Layer> createNetwork(
-    std::vector<std::size_t> layerSizes
-);
 
-double netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex);
+    private :
+        std::vector<Layer> network;
+        std::vector<std::vector<double>> activations;
+        
+        // METHODS
+        
+        Layer createLayer(int inputs, int nodes);
 
-double sigmoid(double& x);
+        double netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex);
 
-std::vector<double> feedForward(const std::vector<double>& inputs, const Layer& layer); 
+        double sigmoid(double& x);
 
-std::vector<double> forwardNetwork(
-    const std::vector<double>& inputs,
-    const std::vector<Layer>& network
-);
+        std::vector<double> feedForward(const std::vector<double>& inputs, const Layer& layer); 
 
-std::vector<std::vector<double>> forwardActivations(
-    const std::vector<double>& inputs,
-    const std::vector<Layer>& network
-);
+        std::vector<double> forwardNetwork(const std::vector<double>& inputs);
+
+        void forwardActivations(const std::vector<double>& inputs);
+
+};
 #endif

@@ -3,7 +3,27 @@
 #include <vector>
 #include "../include/network.h"
 
-double netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex) {
+// ================== CONSTRUCTOR ======================
+Network::Network(std::vector<std::size_t> layerSizes) {
+    // Create a vector to store all layers of the network representing the nnet.
+    network.reserve(layerSizes.size());
+
+    for (int i = 1; i < layerSizes.size(); i++) {
+         network.push_back(createLayer(layerSizes[i - 1], layerSizes[i]));
+        }
+ }
+
+// ===================== GETTERS =========================
+const std::vector<std::vector<double>>& Network::getActivations(const std::vector<double>& inputs){
+    forwardActivations(inputs);
+    return activations;
+    }
+
+std::vector<Layer>& Network::getNetwork(){
+    return network;
+    }
+
+double Network::netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex) {
     // Return the summation of the input vector with the weights/biases
     double output = 0.0;
 
@@ -13,12 +33,12 @@ double netSummation(const std::vector<double>& inputs, const Layer& layer, int w
     return output + layer.biases[weightIndex];
 }
 
-double sigmoid(double& x) {
+double Network::sigmoid(double& x) {
     x = 1.0/(1.0 + std::exp(-x));
     return x;
 }
 
-Layer createLayer(int inputs, int nodes) {
+Layer Network::createLayer(int inputs, int nodes) {
     // Creates a fully connected layer with one weight per input-node connection.
     // Weights are randomized in [-0.5, 0.5], and each node’s bias starts at zero.
     Layer layer;
@@ -34,19 +54,8 @@ Layer createLayer(int inputs, int nodes) {
     return layer;
 }
 
-std::vector<Layer> createNetwork(std::vector<std::size_t> layerSizes) {
-    // Create a vector to store all layers of the network representing the nnet.
-    std::vector<Layer> network;
 
-    network.reserve(layerSizes.size());
-
-    for (int i = 1; i < layerSizes.size(); i++) {
-         network.push_back(createLayer(layerSizes[i - 1], layerSizes[i]));
-        }
-    return network;
-}
-
-std::vector<double> feedForward(const std::vector<double>& inputs, const Layer& layer) {
+std::vector<double> Network::feedForward(const std::vector<double>& inputs, const Layer& layer) {
     // Basically take in the inputs from previous layer then combine them with weights/biases and activate them with sigmoid then return
     // the mapped inputs as outputs to the next layer.
     std::vector<double> output;
@@ -60,7 +69,7 @@ std::vector<double> feedForward(const std::vector<double>& inputs, const Layer& 
     return output;
 }
 
-std::vector<double> forwardNetwork(const std::vector<double>& inputs, const std::vector<Layer>& network) {
+std::vector<double> Network::forwardNetwork(const std::vector<double>& inputs) {
     // Connect the neural network together by applying all activation functions and combination functions
     // of each layer to the original input row to get a prediction matrix.
     std::vector<double> currentOutputs = inputs;
@@ -71,9 +80,8 @@ std::vector<double> forwardNetwork(const std::vector<double>& inputs, const std:
     return currentOutputs;
 }
 
-std::vector<std::vector<double>> forwardActivations(const std::vector<double>& inputs, const std::vector<Layer>& network) {
+void Network::forwardActivations(const std::vector<double>& inputs) {
     std::vector<double> currentOutputs = inputs;
-    std::vector<std::vector<double>> activations;
     activations.reserve(network.size() + 1);
     activations.push_back(inputs);
 
@@ -81,6 +89,5 @@ std::vector<std::vector<double>> forwardActivations(const std::vector<double>& i
          currentOutputs = feedForward(currentOutputs, layer);
          activations.push_back(currentOutputs);
     }
-    return activations;
 }
 

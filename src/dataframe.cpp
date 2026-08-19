@@ -24,29 +24,27 @@ DataFrame::DataFrame(const std::string& filename) {
         }
     }
     this->df = std::move(df);
+    splitDataFrame();
 }
 
-std::vector<std::vector<double>>& DataFrame::getDataFrame() {
+// ======================== GETTERS ======================== 
+
+const std::vector<std::vector<double>>& DataFrame::getPredictors() const {
     return df;
 }
 
-const DataFrame::std::vector<double> getTargets() {
-    std::vector<double> targets;
-    targets.reserve(df.size());
-
-    for (int i = 0; i < df.size(); i++) {
-        targets.push_back(df[i].back());
-        df[i].pop_back();
-    }
+const std::vector<double>& DataFrame::getTargets() const {
     return targets;
 }
+
+// ======================== METHODS ======================== 
+
 
 const int DataFrame::dfSize() const {
     return df.size();
 }
 
 void DataFrame::printDataFrame() const {
-    const std::vector<std::vector<double>>& df = df.getDataFrame(); 
     std::cout << "[" << std::endl;
     for (auto& row : df) {
         std::cout << "[ ";
@@ -58,5 +56,33 @@ void DataFrame::printDataFrame() const {
     std::cout << "\n]";
 }
 
+void DataFrame::printDataFrame(const std::vector<double>& dfRef) const {
+    std::cout  << "[ ";
+    for (auto& val : dfRef) {
+         std::cout << val << " ";
+    }
+    std::cout << "]\n";
+}
 
+
+void DataFrame::printDataFrame(const std::vector<std::vector<double>>& dfRef) const {
+    std::cout << "[" << std::endl;
+    for (auto& row : dfRef) {
+        std::cout << "[ ";
+         for (auto& val : row) {
+            std::cout << val << " ";
+        }
+        std::cout << "]" << std::endl;
+    }
+    std::cout << "\n]";
+}
+
+void DataFrame::splitDataFrame() {
+    targets.reserve(df.size());
+
+    for (int i = 0; i < df.size(); i++) {
+        targets.push_back(df[i].back());
+        df[i].pop_back();
+    }
+}
 
