@@ -1,6 +1,3 @@
-#include <iostream>
-#include <cmath>
-#include <vector>
 #include "../include/network.h"
 
 // ================== CONSTRUCTOR ======================
@@ -14,7 +11,7 @@ Network::Network(std::vector<std::size_t> layerSizes) {
  }
 
 // ===================== GETTERS =========================
-const std::vector<std::vector<double>>& Network::getActivations(const std::vector<double>& inputs){
+std::vector<std::vector<double>>& Network::getActivations(const std::vector<double>& inputs){
     forwardActivations(inputs);
     return activations;
     }
@@ -69,6 +66,7 @@ std::vector<double> Network::feedForward(const std::vector<double>& inputs, cons
     return output;
 }
 
+// RETURNS FINAL PREDICTIONS AFTER FITTING MODEL
 std::vector<double> Network::forwardNetwork(const std::vector<double>& inputs) {
     // Connect the neural network together by applying all activation functions and combination functions
     // of each layer to the original input row to get a prediction matrix.
@@ -80,7 +78,9 @@ std::vector<double> Network::forwardNetwork(const std::vector<double>& inputs) {
     return currentOutputs;
 }
 
+// FOR TRAINING MODEL RETURNS 2D MATRIX OF ALL NODES OUTPUTS
 void Network::forwardActivations(const std::vector<double>& inputs) {
+    activations.clear();
     std::vector<double> currentOutputs = inputs;
     activations.reserve(network.size() + 1);
     activations.push_back(inputs);
@@ -91,3 +91,11 @@ void Network::forwardActivations(const std::vector<double>& inputs) {
     }
 }
 
+std::vector<double> Network::predict(const std::vector<std::vector<double>>& inputs) {
+    std::vector<double> predictions;
+
+    for (const auto& row : inputs) {
+         predictions.push_back(forwardNetwork(row)[0]);
+    }
+    return predictions;
+}

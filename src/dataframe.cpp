@@ -1,5 +1,3 @@
-#include <iostream>
-#include <fstream>
 #include "../include/dataframe.h"
 
 DataFrame::DataFrame(const std::string& filename) {

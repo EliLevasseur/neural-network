@@ -1,23 +1,38 @@
 # MLP Neural Network From Scratch
 
+This project is my attempt at building a multilayer perceptron neural network from scratch in C++.
+
 ## Current State
 
 ### Data Processing
-The project has an internal system defined in [dataframe.h](dataframe.h) that turns a csv file into a matrix the represent the rows and columns.
 
-### Network 
-The representation of a network is a `std::vector<Layer>`, a vector of layers:
-#### Layer
-A Layer is a struct that stores two values:
-1. **Weights**:
- - stored in a `std::vector<std::vector<double>>`
- - Has one vector of connecting weights for each node in the layer
-2. **Biases**:
-  - Stored in a `std::vector<double>`
-  - One bias per node
+The project has a `DataFrame` class defined in [dataframe.h](include/dataframe.h) and [dataframe.cpp](src/dataframe.cpp). It reads a numeric CSV file into a 2D `std::vector`, where each inner vector represents one row of the dataset.
 
-The Network does not define nodes as objects, the nodes are represented through indexing and a collective of functions that map inputs to the desired output
+For the dataset I am currently testing with, the last value in each row is the target. `getTargets()` separates those target values from the predictor values used as the network's inputs.
 
-I have created the representation of the network within [network.cpp](network.cpp) and tested a single forward pass to get the first prediction
+### Network
 
-Currently working on a class to calculate weight gradients that I will use in a SGD optimizer to calculate the updated weights for the next row of the dataset
+The network is represented as a `std::vector<Layer>`, where each element is one layer of the network.
+
+Each `Layer` stores:
+
+1. **Weights**
+   - Stored in a `std::vector<std::vector<double>>`.
+   - Each inner vector contains all the weights entering one node.
+   - A weight can be accessed with `weights[node][input]`.
+
+2. **Biases**
+   - Stored in a `std::vector<double>`.
+   - Each node in the layer has one bias.
+
+The network does not define every node as its own object. Nodes and their connections are represented through vector indexes, and a collection of functions handles the calculations between layers.
+
+The functions in [network.cpp](src/network.cpp) currently create layers and networks, calculate weighted sums, apply the sigmoid activation function, and run inputs through the complete network. A forward pass can also save the original inputs and the output of every layer as activations, which are needed later during backpropagation.
+
+### Training
+
+I am currently working on the `Trainer` class in [training.cpp](src/training.cpp). It calculates one delta per node and one gradient per weight using the activations saved during the forward pass.
+
+The next goal is to use those gradients to update the weights and biases after each row. This will make the training process stochastic gradient descent: process one row, calculate its gradients, update the network immediately, and then continue to the next row.
+
+For now, the network is being built for binary classification with a sigmoid output and binary cross-entropy loss. The structure is still intended to stay general enough to support different layer sizes.

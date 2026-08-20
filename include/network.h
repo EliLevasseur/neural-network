@@ -1,6 +1,8 @@
 #ifndef NETWORK_H
 #define NETWORK_H
 
+#include <iostream>
+#include <cmath>
 #include <vector>
 
 struct Layer {
@@ -11,19 +13,29 @@ struct Layer {
 class Network {
     public :
         // Constructors
+
         Network(std::vector<std::size_t> layerSizes);
     
         // GETTERS
-        const std::vector<std::vector<double>>& getActivations(const std::vector<double>& inputs);
+
+        std::vector<std::vector<double>>& getActivations(const std::vector<double>& inputs);
+
         std::vector<Layer>& getNetwork();
+        
+        // PUBLIC METHODS
+
+
+        std::vector<double> predict(const std::vector<std::vector<double>>& inputs);
+
+
 
 
     private :
         std::vector<Layer> network;
         std::vector<std::vector<double>> activations;
         
-        // METHODS
-        
+        // INTERNAL METHODS
+       
         Layer createLayer(int inputs, int nodes);
 
         double netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex);
@@ -35,6 +47,6 @@ class Network {
         std::vector<double> forwardNetwork(const std::vector<double>& inputs);
 
         void forwardActivations(const std::vector<double>& inputs);
-
+        
 };
 #endif
