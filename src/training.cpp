@@ -19,7 +19,7 @@ void Trainer::sgdOptimizer() {
 	}
 }
 
-// ================== TRAINING SEQUENCE =======================
+// ================== CALCULATIONS FOR TRAINING =======================
 
 void Trainer::getDeltas(double target) {
       	deltas.clear();
@@ -56,6 +56,8 @@ void Trainer::getWeightGradients() {
 	}
 }
 
+// ================== TRAINING SEQUENCE =======================
+
 void Trainer::trainNetwork(const std::vector<std::vector<double>>& predictors, const std::vector<double>& targets) {
 	for (std::size_t row = 0; row < targets.size(); row++) {
 		activations.clear();
@@ -77,6 +79,33 @@ void Trainer::fit(const std::size_t epochs, const std::vector<std::vector<double
 
 // ================== HELPER FUNCTIONS =======================
 //
+double Trainer::binaryCrossEntropy(const std::vector<double>& predictions, const std::vector<double>& targets) const {
+    assert(predictions.size() == targets.size() && predictions.size() > 0 && "Predictions and targets must have the same non-zero size.");
+    double loss = 0.0;
+    for (std::size_t i = 0; i < predictions.size(); i++) {
+        const double probability = std::clamp(predictions[i], 1.0e-15, 1.0 - 1.0e-15);
+        loss +=
+            -(targets[i] * std::log(probability) + (1 - targets[i]) * std::log(1 - probability)
+        );
+            }
+    loss /= predictions.size();
+    return loss;
+}
+
+double Trainer::getAccuracy(const std::vector<double>& predictions, const std::vector<double>& targets) const {
+    assert(predictions.size() == targets.size() && predictions.size() > 0 && "Predictions and targets must have the same non-zero size.");
+    double accuracy = 0.0;
+    for (std::size_t i = 0; i < predictions.size(); i++) {
+         if (predictions[i] >= 0.5 && targets[i] == 1) {
+            accuracy += 1;
+         } else if (predictions[i] < 0.5 && targets[i] == 0) {
+            accuracy += 1;
+         }
+    }
+    accuracy /= predictions.size();
+    return accuracy;
+}
+
 // Yes i let ai make the progress bar thats it though
 void Trainer::printFitProgress(
     std::size_t currentEpoch,

@@ -24,11 +24,7 @@ class Network {
         
         // PUBLIC METHODS
 
-
         std::vector<double> predict(const std::vector<std::vector<double>>& inputs);
-
-
-
 
     private :
         std::vector<Layer> network;

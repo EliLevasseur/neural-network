@@ -1,14 +1,20 @@
 #include "../include/dataframe.h"
 #include "../include/training.h"
+
 #include <iomanip>
 #include <string_view>
+#include <string>
 #include <iostream>
 #include <vector>
+
 void printFlag(std::string_view str) {
 	std::cout << "\n===================== " << str << " ===================== \n";
 }
-	
 
+void printFlag(const double num) {
+	std::cout << "\n===================== " << num << " ===================== \n";
+}
+	
 void dfTest(DataFrame& dfObject) {
 	printFlag("DATAFRAME TEST");
 	printFlag("              ");
@@ -16,6 +22,49 @@ void dfTest(DataFrame& dfObject) {
 	dfObject.printDataFrame();
 	printFlag("Targets");
 	dfObject.printDataFrame(dfObject.getTargets());
+
+}
+
+void accuracyTest(const std::vector<double>& predictions, const std::vector<double>& targets, Trainer& trainer) {
+	printFlag("ACCURACY TEST");
+	const double accuracy = trainer.getAccuracy(predictions, targets);
+	printFlag(accuracy);
+}
+
+void lossTest(const std::vector<double>& predictions, const std::vector<double>& targets, Trainer& trainer) {
+	printFlag("LOSS TEST");
+	const double loss = trainer.binaryCrossEntropy(predictions, targets);
+	printFlag(loss);
+}
+
+void splitTest(const std::vector<std::vector<double>>& trainX, const std::vector<std::vector<double>>& testX) {
+	printFlag("TRAIN TEST SPLIT TEST");
+
+	std::cout << "\n+------+------+------+\n";
+	std::cout << "|       X_TRAIN      |\n";
+	std::cout << "+------+------+------+\n";
+
+
+	for (auto& row : trainX) {
+      		std::cout << "| ";
+		for (auto& val : row) {
+      			std::cout << val << " |";
+      		}
+		std::cout << "\n+-----+-----+-----+\n";
+      		}
+
+	std::cout << "+------+------+-----+\n";
+	std::cout << "|       X_TEST      |\n";
+	std::cout << "+------+------+-----+\n";
+
+
+	for (auto& row : testX) {
+      		std::cout << "| ";
+		for (auto& val : row) {
+      			std::cout << val << " |";
+      		}
+		std::cout << "\n+------+------+----+\n";
+      	}
 
 }
 
