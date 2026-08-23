@@ -1,8 +1,6 @@
 #include "../include/dataframe.h"
 
-const std::size_t targetIndex = 3;
-
-DataFrame::DataFrame(const std::string& filename) {
+DataFrame::DataFrame(const std::string& filename, const std::size_t targetIndex) : targetIndex(targetIndex) {
     std::ifstream file(filename);
     std::vector<std::vector<double>> df;
     std::vector<double> row;

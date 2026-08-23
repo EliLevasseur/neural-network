@@ -23,7 +23,7 @@ class DataFrame {
     public :
         // CONSTRUCTOR
 
-        DataFrame(const std::string& filename);
+        DataFrame(const std::string& filename, const std::size_t targetIndex);
         
         // GETTERS
 

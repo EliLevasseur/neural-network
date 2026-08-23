@@ -5,11 +5,14 @@
 #include <iomanip>
 #include <iostream>
 
+const int RANDOM_SEED = 42;
+const bool PLOT_OUTPUT = false;
 const double LEARNING_RATE = 0.09;
 const std::size_t EPOCHS = 1000;
-const int RANDOM_SEED = 42;
+const std::size_t TARGET_INDEX = 3;
 const std::vector<std::size_t> LAYER_SIZES = {3, 2, 4, 1};
-const bool PLOT_OUTPUT = false;
+
+
 
 void displayPredictions(
     const std::vector<double>& predictions,
