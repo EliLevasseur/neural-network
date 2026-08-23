@@ -1,13 +1,14 @@
 #include "../include/training.h"
 
 Trainer::Trainer(
-	double learningRate,
-	Network& Model
-	) : learningRate(learningRate), Model(Model), network(Model.getNetwork()) {}
-
-
+	Network& Model,
+    double learningRate
+	) : Model(Model),
+        network(Model.getNetwork()),
+        learningRate(learningRate) {}
 
 // ================== OPTIMIZERS =======================
+
 void Trainer::sgdOptimizer() {
 	for (std::size_t layer = 0; layer < network.size(); layer++) {
       		for (std::size_t node = 0; node < network[layer].weights.size(); node++) {
@@ -19,9 +20,19 @@ void Trainer::sgdOptimizer() {
 	}
 }
 
+// ================== GETTERS =======================
+
+const std::vector<std::vector<std::vector<double>>>& Trainer::getWeightGradients() const {
+    return weightGradients;
+}
+
+const std::vector<std::vector<double>>& Trainer::getDeltas() const {
+    return deltas;
+}
+
 // ================== CALCULATIONS FOR TRAINING =======================
 
-void Trainer::getDeltas(double target) {
+void Trainer::calculateDeltas(double target) {
       	deltas.clear();
       	deltas.resize(network.size());
 	double outputDelta = activations.back().back() - target;
@@ -42,7 +53,7 @@ void Trainer::getDeltas(double target) {
 	}
 }
 
-void Trainer::getWeightGradients() {
+void Trainer::calculateWeightGradients() {
 	weightGradients.clear();
 	weightGradients.resize(network.size());
 	for (std::size_t layer = 0; layer < network.size(); layer++) {
@@ -58,14 +69,17 @@ void Trainer::getWeightGradients() {
 
 // ================== TRAINING SEQUENCE =======================
 
+void Trainer::computeGradients(const std::vector<double>& predictor, const double& target) {
+		activations = Model.getActivations(predictor);
+      	calculateDeltas(target);
+		calculateWeightGradients();
+}
+
 void Trainer::trainNetwork(const std::vector<std::vector<double>>& predictors, const std::vector<double>& targets) {
-	for (std::size_t row = 0; row < targets.size(); row++) {
-		activations.clear();
-		activations = Model.getActivations(predictors[row]);
-      	getDeltas(targets[row]);
-		getWeightGradients();
-		sgdOptimizer();
-	}
+    for (std::size_t i = 0; i < predictors.size(); i++) {
+      		computeGradients(predictors[i], targets[i]);
+            sgdOptimizer();
+    }
 }
 
 void Trainer::fit(const std::size_t epochs, const std::vector<std::vector<double>>& predictors, const std::vector<double>& targets) {

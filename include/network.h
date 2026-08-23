@@ -32,7 +32,7 @@ class Network {
         
         // INTERNAL METHODS
        
-        Layer createLayer(int inputs, int nodes);
+        Layer createLayer(std::size_t inputs, std::size_t nodes);
 
         double netSummation(const std::vector<double>& inputs, const Layer& layer, int weightIndex);
 

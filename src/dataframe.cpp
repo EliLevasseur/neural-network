@@ -1,5 +1,7 @@
 #include "../include/dataframe.h"
 
+const std::size_t targetIndex = 3;
+
 DataFrame::DataFrame(const std::string& filename) {
     std::ifstream file(filename);
     std::vector<std::vector<double>> df;
@@ -101,8 +103,10 @@ void DataFrame::printDataFrame(const std::vector<std::vector<double>>& dfRef) co
 void DataFrame::splitDataFrame() {
     targets.reserve(df.size());
 
-    for (int i = 0; i < df.size(); i++) {
-        targets.push_back(df[i].back());
-        df[i].pop_back();
+    for (std::size_t i = 0; i < df.size(); i++) {
+        targets.push_back(df[i][targetIndex]);
+        df[i].erase(df[i].begin() + targetIndex);
     }
 }
+
+

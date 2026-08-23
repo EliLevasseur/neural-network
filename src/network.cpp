@@ -5,7 +5,7 @@ Network::Network(std::vector<std::size_t> layerSizes) {
     // Create a vector to store all layers of the network representing the nnet.
     network.reserve(layerSizes.size());
 
-    for (int i = 1; i < layerSizes.size(); i++) {
+    for (std::size_t i = 1; i < layerSizes.size(); i++) {
          network.push_back(createLayer(layerSizes[i - 1], layerSizes[i]));
         }
  }
@@ -24,7 +24,7 @@ double Network::netSummation(const std::vector<double>& inputs, const Layer& lay
     // Return the summation of the input vector with the weights/biases
     double output = 0.0;
 
-    for (int i = 0; i < inputs.size(); i++) {
+    for (std::size_t i = 0; i < inputs.size(); i++) {
         output += inputs[i] * layer.weights[weightIndex][i];
     }
     return output + layer.biases[weightIndex];
@@ -35,7 +35,7 @@ double Network::sigmoid(double& x) {
     return x;
 }
 
-Layer Network::createLayer(int inputs, int nodes) {
+Layer Network::createLayer(std::size_t inputs, std::size_t nodes) {
     // Creates a fully connected layer with one weight per input-node connection.
     // Weights are randomized in [-0.5, 0.5], and each node’s bias starts at zero.
     Layer layer;
