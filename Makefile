@@ -5,7 +5,7 @@ SOURCES := src/dataframe.cpp src/network.cpp src/training.cpp
 HEADERS := $(wildcard include/*.h)
 TEST_SOURCES := tests/test_main.cpp tests/network_test.cpp tests/training_test.cpp
 
-.PHONY: run test graph
+.PHONY: run test graph 
 
 run: build/nnet
 	./build/nnet
@@ -14,6 +14,7 @@ test: build/nnet_tests
 	./build/nnet_tests
 
 graph: build/nnet
+	clear
 	./build/nnet | python3 ./visualizations/graphing.py
 
 build/nnet: main.cpp $(SOURCES) $(HEADERS)

@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <cassert>
 #include <algorithm>
+#include <stdexcept>
 #include "../include/network.h"
 
 class Trainer {

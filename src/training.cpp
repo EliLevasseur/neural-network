@@ -33,25 +33,30 @@ const std::vector<std::vector<double>>& Trainer::getDeltas() const {
 // ================== CALCULATIONS FOR TRAINING =======================
 
 void Trainer::calculateDeltas(double target) {
+
+    if (network.empty()) {
+        throw std::logic_error("Cannot calculate deltas for an empty network.");
+            }
       	deltas.clear();
       	deltas.resize(network.size());
-	double outputDelta = activations.back().back() - target;
+	const double outputDelta = activations.back().back() - target;
 	deltas.back().push_back(outputDelta);
       
-	for (int layer = network.size() - 2; layer >= 0; layer--) {
-      		for (std::size_t node = 0; node < network[layer].weights.size(); node++) {
-			double x = 0;
-			if (layer == network.size() - 2) {
-				x = outputDelta * network[layer + 1].weights[0][node]; }
-		 	else {
-				for (std::size_t weight = 0; weight < network[layer + 1].weights.size(); weight++) {
-					x += network[layer + 1].weights[weight][node] * deltas[layer + 1][weight];
-					}
-			}
-			deltas[layer].push_back(activations[layer + 1][node]* (1 - activations[layer + 1][node]) * x);
-		}
-	}
+	for (std::size_t layer = network.size() - 1; layer > 0;) {
+        --layer;
+        for (std::size_t node = 0; node < network[layer].weights.size(); node++) {
+        double weightedDelta = 0;
+            for (std::size_t nextNode = 0; nextNode < network[layer + 1].weights.size(); nextNode++) {
+                weightedDelta += network[layer + 1].weights[nextNode][node] * deltas[layer + 1][nextNode];
+                }
+            const double activation = activations[layer + 1][node];
+
+            deltas[layer].push_back(activation* (1 - activation) * weightedDelta);
+        }
+        
+    }
 }
+
 
 void Trainer::calculateWeightGradients() {
 	weightGradients.clear();

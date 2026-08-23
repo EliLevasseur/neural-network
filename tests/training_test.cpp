@@ -11,6 +11,8 @@
 
 namespace {
 
+
+
 double calculateFixtureLoss(
     Network& model,
     const Trainer& trainer,
@@ -56,11 +58,13 @@ std::string biasName(
 } // namespace
 
 void runTrainingTests(TestRunner& tests) {
+    const double learningRate = 0.1;
+
     tests.section("Loss and gradients");
 
     Network model({2, 2, 1});
     configureGradientFixture(model);
-    Trainer trainer(model, 0.1);
+    Trainer trainer(model, learningRate);
 
     const std::vector<double> input = gradientFixtureInput();
     constexpr double target = 1.0;
@@ -201,8 +205,17 @@ void runTrainingTests(TestRunner& tests) {
         }
     }
 
-    tests.expectTrue(
-        parametersMatch(parametersBeforeNumericalCheck, model.getNetwork()),
-        "gradient checker restores every parameter"
-    );
+    tests.section("SGD optimizer updates weights and biases");
+    trainer.sgdOptimizer();
+    for (std::size_t layer = 0; layer < layers.size(); layer++) {
+        for (std::size_t node = 0; node < layers[layer].weights.size(); node++) {
+            for (std::size_t input = 0; input < layers[layer].weights[node].size(); input++) {
+                double expected = parametersBeforeNumericalCheck[layer].weights[node][input] - analyticWeights[layer][node][input] * learningRate;
+                tests.expectNear(layers[layer].weights[node][input], expected, 1e-19, weightName("sgdOptimizer() updates weights", layer, node, input));
+            }
+            double expectedBias = parametersBeforeNumericalCheck[layer].biases[node] - analyticBiases[layer][node] * learningRate;
+            tests.expectNear(layers[layer].biases[node], expectedBias, 1e-19, biasName("sgdOptimizer() updates biases", layer, node));
+        }
+    }
+
 }
