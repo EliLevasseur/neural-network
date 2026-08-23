@@ -39,6 +39,7 @@ class DataFrame {
         void printDataFrame() const;
         
     private:
+        std::size_t targetIndex;
         void splitDataFrame();
         splitContainer container;
         std::vector<std::vector<double>> df;

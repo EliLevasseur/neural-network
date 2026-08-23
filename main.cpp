@@ -41,7 +41,7 @@ void displayPredictions(
 int main() {
     // CONVERT CSV TO MATRIX + SPLIT TARGETS FROM PREDICTORS + TRAIN TEST SPLIT
     //
-    DataFrame dataFrame("data/binary_test.csv");
+    DataFrame dataFrame("data/binary_test.csv", TARGET_INDEX);
     splitContainer split = dataFrame.trainTestSplit(0.8, RANDOM_SEED);
 
     // CREATE NETWORK WITH GIVEN LAYER SIZES (NODES PER LAYER)
