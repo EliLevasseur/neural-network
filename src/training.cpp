@@ -82,12 +82,24 @@ void Trainer::trainNetwork(const std::vector<std::vector<double>>& predictors, c
     }
 }
 
-void Trainer::fit(const std::size_t epochs, const std::vector<std::vector<double>>& predictors, const std::vector<double>& targets) {
+void Trainer::fit(
+    const std::size_t epochs,
+    const std::vector<std::vector<double>>& predictors,
+    const std::vector<double>& targets,
+    bool outputLossCsv
+) {
 	auto startTime = std::chrono::steady_clock::now();
 
 	for (std::size_t epoch = 0; epoch < epochs; epoch++) {
-      		trainNetwork(predictors, targets);
-            printFitProgress(epoch + 1, epochs, startTime);
+		trainNetwork(predictors, targets);
+
+		if (outputLossCsv) {
+			const auto predictions = Model.predict(predictors);
+			const double epochLoss = binaryCrossEntropy(predictions, targets);
+			std::cout << epoch + 1 << ',' << epochLoss << '\n' << std::flush;
+		} else {
+			printFitProgress(epoch + 1, epochs, startTime);
+		}
 	}
 }
 

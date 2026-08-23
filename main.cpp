@@ -6,9 +6,10 @@
 #include <iostream>
 
 const double LEARNING_RATE = 0.09;
-const std::size_t EPOCHS = 10000;
+const std::size_t EPOCHS = 1000;
 const int RANDOM_SEED = 42;
 const std::vector<std::size_t> LAYER_SIZES = {3, 2, 4, 1};
+const bool PLOT_OUTPUT = true;
 
 void displayPredictions(
     const std::vector<double>& predictions,
@@ -46,18 +47,16 @@ int main() {
     // INITIALIZE THE TRAINER BY PASSING IT THE NETWORK TO OPTIMIZE WEIGHTS
     //
     Trainer trainer(network, LEARNING_RATE);
-    trainer.fit(EPOCHS, split.XTrain, split.yTrain);
+    trainer.fit(EPOCHS, split.XTrain, split.yTrain, PLOT_OUTPUT);
 
     // GET AND REPORT FINAL PREDICTIONS
     //
-    const auto predictions = network.predict(split.XTest);
-    displayPredictions(predictions, split.yTest);
-    std::cout << "Test accuracy: "
-              << trainer.getAccuracy(predictions, split.yTest)
-              << '\n';
-    std::cout << "Test loss: "
-              << trainer.binaryCrossEntropy(predictions, split.yTest)
-              << '\n';
+    if (!PLOT_OUTPUT) {
+        const auto predictions = network.predict(split.XTest);
+        displayPredictions(predictions, split.yTest);
+        std::cout << "Test accuracy: " << trainer.getAccuracy(predictions, split.yTest) << '\n';
+        std::cout << "Test loss: " << trainer.binaryCrossEntropy(predictions, split.yTest) << '\n';
+    }
 
     return 0;
 }

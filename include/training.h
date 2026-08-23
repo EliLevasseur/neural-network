@@ -42,7 +42,12 @@ class Trainer {
 		// TRAINING SEQUENCE
 		void computeGradients(const std::vector<double>& predictor, const double& target);
 		void trainNetwork(const std::vector<std::vector<double>>& predictors, const std::vector<double>& targets);
-		void fit(const std::size_t epochs, const std::vector<std::vector<double>>& predictors, const std::vector<double>& targets);
+		void fit(
+			const std::size_t epochs,
+			const std::vector<std::vector<double>>& predictors,
+			const std::vector<double>& targets,
+			bool outputLossCsv = false
+		);
 
 		//OPTIMIZERS
 		void sgdOptimizer();
