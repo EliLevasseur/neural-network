@@ -7,17 +7,14 @@
 
 const int RANDOM_SEED = 42;
 const bool PLOT_OUTPUT = false;
-const double LEARNING_RATE = 0.09;
+const double LEARNING_RATE = 0.1;
 const std::size_t EPOCHS = 1000;
-const std::size_t TARGET_INDEX = 3;
-const std::vector<std::size_t> LAYER_SIZES = {3, 2, 4, 1};
+const std::size_t TARGET_INDEX = 8;
+const std::vector<std::size_t> LAYER_SIZES = {8, 8, 4, 1};
 
 
 
-void displayPredictions(
-    const std::vector<double>& predictions,
-    const std::vector<double>& targets
-) {
+void displayPredictions(const std::vector<double>& predictions, const std::vector<double>& targets) {
     std::cout << "\n+------+-------------+---------+\n"
               << "| Row  | Probability | Result  |\n"
               << "+------+-------------+---------+\n";
@@ -41,7 +38,7 @@ void displayPredictions(
 int main() {
     // CONVERT CSV TO MATRIX + SPLIT TARGETS FROM PREDICTORS + TRAIN TEST SPLIT
     //
-    DataFrame dataFrame("data/binary_test.csv", TARGET_INDEX);
+    DataFrame dataFrame("data/complex_8d_test.csv", TARGET_INDEX);
     splitContainer split = dataFrame.trainTestSplit(0.8, RANDOM_SEED);
 
     // CREATE NETWORK WITH GIVEN LAYER SIZES (NODES PER LAYER)

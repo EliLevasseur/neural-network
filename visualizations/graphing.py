@@ -61,7 +61,7 @@ reader.start()
 animation = FuncAnimation(
     fig,
     update,
-    interval=25,
+    interval=5,
     cache_frame_data=False,
 )
 
