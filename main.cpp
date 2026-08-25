@@ -9,7 +9,7 @@ const int RANDOM_SEED = 42;
 const bool PLOT_OUTPUT = false;
 const double LEARNING_RATE = 0.1;
 const std::size_t EPOCHS = 1000;
-const std::size_t TARGET_INDEX = 8;
+const std::size_t TARGET_INDEX = 8; // This is the index of the binary target in your dataset.
 const std::vector<std::size_t> LAYER_SIZES = {8, 8, 4, 1};
 
 

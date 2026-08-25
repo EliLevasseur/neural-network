@@ -9,6 +9,7 @@
 #include <random>
 #include <numeric>
 #include <cassert>
+#include <stdexcept>
 
 struct splitContainer {
      std::vector<std::vector<double>> XTest;
@@ -16,7 +17,6 @@ struct splitContainer {
 
      std::vector<double> yTest;
      std::vector<double> yTrain;
-
 };
 
 class DataFrame {
@@ -29,8 +29,7 @@ class DataFrame {
 
         const std::vector<std::vector<double>>& getPredictors() const;
         const std::vector<double>& getTargets() const;
-        const splitContainer& trainTestSplit(double splitSize, std::size_t seed = 42);
-
+        splitContainer trainTestSplit(double splitSize, std::size_t seed = 42) const;
         // METHODS
 
         int dfSize() const;
@@ -41,7 +40,6 @@ class DataFrame {
     private:
         std::size_t targetIndex;
         void splitDataFrame();
-        splitContainer container;
         std::vector<std::vector<double>> df;
         std::vector<double> targets;
         

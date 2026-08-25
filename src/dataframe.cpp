@@ -35,9 +35,18 @@ const std::vector<double>& DataFrame::getTargets() const {
     return targets;
 }
 
-const splitContainer& DataFrame::trainTestSplit(double splitSize, std::size_t seed) {
-    assert(splitSize < 1 && splitSize > 0);
-    splitSize *= df.size();
+splitContainer DataFrame::trainTestSplit(double splitSize, std::size_t seed) const {
+    if (df.size() < 2)
+        throw std::invalid_argument("Training dataset must have more than one row");
+
+    if (splitSize >= 1.0 || splitSize <= 0.0)
+        throw std::invalid_argument("Split size must be between one and zero");
+
+
+    const std::size_t trainCount = static_cast<std::size_t>(splitSize * static_cast<double>(df.size()));
+
+    if (trainCount == 0 || trainCount >= df.size())
+        throw std::invalid_argument("Split must have at least one test row and one train row");
 
     std::vector<std::size_t> indices(df.size());
     std::iota(indices.begin(), indices.end(), 0);
@@ -45,14 +54,16 @@ const splitContainer& DataFrame::trainTestSplit(double splitSize, std::size_t se
     std::mt19937 generator(seed);
 
     std::shuffle(indices.begin(), indices.end(), generator);
-    
-    for (std::size_t row = 0; row < splitSize; row++) {
+   
+    splitContainer container;
+
+    for (std::size_t row = 0; row < trainCount; row++) {
 
          container.yTrain.push_back(targets[indices[row]]);
          container.XTrain.push_back(df[indices[row]]);
     }
-
-    for (std::size_t row = splitSize; row < df.size(); row++) {
+    
+    for (std::size_t row = trainCount; row < df.size(); row++) {
          container.yTest.push_back(targets[indices[row]]);
          container.XTest.push_back(df[indices[row]]);
         }
