@@ -1,159 +1,123 @@
 # MLP Neural Network From Scratch
 
-This project is my implementation of a multilayer perceptron neural network built from scratch in C++. The goal is to understand what is actually happening inside a neural network instead of relying on an existing machine-learning library.
+This project is a from-scratch C++ implementation of a multilayer perceptron. Its purpose is to make the calculations inside a neural network understandable and testable before the project grows into a more general neural-network framework.
 
-Version `0.1` can read a numeric CSV dataset, build a configurable fully connected network, train it using backpropagation and stochastic gradient descent, and make binary predictions.
+Version `0.1` is the reference model. It supports fully connected sigmoid layers, binary classification, backpropagation, stochastic gradient descent, evaluation on held-out rows, and deterministic numerical gradient tests.
 
 ## Current Features
 
-- Numeric CSV file loading
-- Automatic separation of predictors and targets
-- Configurable network layer sizes
-- Fully connected layers with weights and biases
-- Sigmoid activation
-- Complete feedforward pass
+- Numeric CSV loading without a header row
+- Configurable target-column index
+- Reproducible shuffled train/test splitting with an optional seed
+- Configurable fully connected layer sizes
+- Weights stored as `weights[node][input]`
+- Sigmoid activations
+- Feedforward prediction
+- Binary cross-entropy loss
+- Binary classification accuracy
 - Backpropagation through hidden and output layers
-- Stochastic gradient descent
-- Epoch-based model fitting
-- Terminal training progress
-- Binary prediction output
+- Per-sample stochastic gradient descent
+- Epoch-based training progress
+- Optional live training-loss visualization
+- Separate automated test executable
+- Deterministic forward-pass, backpropagation, numerical-gradient, and SGD tests
 
 ## Data Processing
 
-The `DataFrame` class reads a numeric CSV file and stores it as a two-dimensional `std::vector`.
+Each CSV row contains numeric predictors and one binary target. The constructor receives the zero-based index of the target column:
 
-Each row represents one sample:
-
-```text
-predictor_1,predictor_2,predictor_3,target
+```cpp
+DataFrame dataFrame("data/binary_test.csv", 3);
 ```
 
-For example:
+For a row shaped like:
 
 ```text
-0.20,0.70,0.70,1
-0.10,0.20,0.30,0
+predictor_0,predictor_1,predictor_2,target
 ```
 
-The final value in each row is treated as the target. After loading the file, the class separates the data into:
+the target index is `3`. The target does not need to be the final column; the selected value is removed from every predictor row and stored separately.
 
-- A two-dimensional predictor matrix
-- A one-dimensional target vector
-
-These can be accessed using:
+Access the complete predictor and target collections with:
 
 ```cpp
 const auto& predictors = dataFrame.getPredictors();
 const auto& targets = dataFrame.getTargets();
 ```
 
-The current CSV reader expects numeric data without a header row.
+Create shuffled training and testing sets with:
+
+```cpp
+const auto split = dataFrame.trainTestSplit(0.8, 42);
+```
+
+The first argument is the fraction assigned to training. The seed makes the row split reproducible. The returned `splitContainer` owns:
+
+```text
+XTrain
+yTrain
+XTest
+yTest
+```
+
+Training must use only `XTrain` and `yTrain`. Evaluate the finished model with `XTest` and `yTest`.
 
 ## Network Structure
 
-The network is represented by the `Network` class. Internally, it stores a vector of `Layer` objects.
+The network stores a vector of fully connected `Layer` objects. Each layer owns a weight matrix and a bias vector.
 
-Each layer contains:
-
-- A two-dimensional weight matrix
-- A one-dimensional bias vector
-
-Weights are stored using the following layout:
+Create a network by providing every layer size, including the input size:
 
 ```cpp
-weights[node][input]
+Network network({3, 5, 3, 1});
 ```
 
-This means every node stores one weight for every value entering it from the previous layer.
+This topology contains three inputs, hidden layers with five and three nodes, and one binary output node.
 
-A network is created by passing a vector containing the number of nodes in each layer:
-
-```cpp
-const std::vector<std::size_t> layerSizes = {3, 5, 3, 1};
-Network network(layerSizes);
-```
-
-In this example:
-
-- The input contains 3 predictor values
-- The first hidden layer contains 5 nodes
-- The second hidden layer contains 3 nodes
-- The output layer contains 1 node
-
-The first value only describes the input size. Every value after it creates a fully connected layer.
-
-## Feedforward
-
-During a forward pass, each node calculates a weighted sum:
+Each node calculates:
 
 ```text
 weighted sum = inputs * weights + bias
+activation   = sigmoid(weighted sum)
 ```
 
-The sigmoid activation function is then applied:
-
-```text
-sigmoid(x) = 1 / (1 + e^(-x))
-```
-
-The output of one layer becomes the input to the next layer. The final output is treated as the prediction probability.
-
-For binary classification:
+The final sigmoid output is interpreted as a probability:
 
 ```text
 probability >= 0.5  -> class 1
-probability < 0.5   -> class 0
+probability <  0.5  -> class 0
 ```
-
-During training, the network also saves the original input and every layer's activations because they are needed during backpropagation.
 
 ## Training
 
-Training is handled by the `Trainer` class.
+Construct `Trainer` by passing the model first and the learning rate second:
 
-For every row in the dataset, the trainer:
-
-1. Runs the row through the network
-2. Saves the activations from the forward pass
-3. Calculates the output delta
-4. Propagates deltas backward through the hidden layers
-5. Calculates one gradient for every weight
-6. Updates every weight and bias
-
-The update rule is:
-
-```text
-new weight = old weight - learning rate * weight gradient
+```cpp
+Trainer trainer(network, 0.09);
+trainer.fit(1000, split.XTrain, split.yTrain);
 ```
 
-The network updates immediately after processing each row, making the current training method stochastic gradient descent.
+For every training row, the trainer performs a forward pass, calculates deltas and weight gradients, and then applies SGD.
 
-The output delta uses the simplified derivative produced by combining a sigmoid output with binary cross-entropy:
+For a sigmoid output with binary cross-entropy, the output delta simplifies to:
 
 ```text
 output delta = prediction - target
 ```
 
-The model can be trained for multiple epochs:
+Generate held-out predictions and metrics after training:
 
 ```cpp
-Trainer trainer(learningRate, network);
-trainer.fit(epochs, predictors, targets);
+const auto predictions = network.predict(split.XTest);
+
+const double accuracy =
+    trainer.getAccuracy(predictions, split.yTest);
+
+const double loss =
+    trainer.binaryCrossEntropy(predictions, split.yTest);
 ```
 
-One epoch means the trainer has processed every row in the training dataset once.
-
-## Making Predictions
-
-After training, predictions can be generated with:
-
-```cpp
-const auto predictions = network.predict(predictors);
-```
-
-Each returned value is a probability between `0` and `1`.
-
-## Example
+## Complete Example
 
 ```cpp
 #include "include/dataframe.h"
@@ -161,17 +125,19 @@ Each returned value is a probability between `0` and `1`.
 #include "include/training.h"
 
 int main() {
-    DataFrame dataFrame("data/binary_test.csv");
-
-    const auto& predictors = dataFrame.getPredictors();
-    const auto& targets = dataFrame.getTargets();
+    DataFrame dataFrame("data/binary_test.csv", 3);
+    const auto split = dataFrame.trainTestSplit(0.8, 42);
 
     Network network({3, 5, 3, 1});
-    Trainer trainer(0.09, network);
+    Trainer trainer(network, 0.09);
 
-    trainer.fit(1000, predictors, targets);
+    trainer.fit(1000, split.XTrain, split.yTrain);
 
-    const auto predictions = network.predict(predictors);
+    const auto predictions = network.predict(split.XTest);
+    const double accuracy =
+        trainer.getAccuracy(predictions, split.yTest);
+    const double loss =
+        trainer.binaryCrossEntropy(predictions, split.yTest);
 
     return 0;
 }
@@ -181,70 +147,122 @@ int main() {
 
 ```text
 neural-network/
-├── data/
-│   └── binary_test.csv
-├── include/
-│   ├── dataframe.h
-│   ├── network.h
-│   └── training.h
-├── src/
-│   ├── dataframe.cpp
-│   ├── network.cpp
-│   └── training.cpp
-├── tests/
-│   └── test.cpp
-├── main.cpp
-├── Makefile
-└── README.md
+|-- data/
+|   |-- binary_test.csv
+|   `-- complex_8d_test.csv
+|-- include/
+|   |-- dataframe.h
+|   |-- network.h
+|   `-- training.h
+|-- src/
+|   |-- dataframe.cpp
+|   |-- network.cpp
+|   `-- training.cpp
+|-- tests/
+|   |-- network_test.cpp
+|   |-- test_main.cpp
+|   |-- test_utils.h
+|   `-- training_test.cpp
+|-- visualizations/
+|   `-- graphing.py
+|-- main.cpp
+|-- Makefile
+`-- README.md
 ```
 
 ## Building and Running
 
-The project includes a Makefile that compiles the source files, adds an optional flag to run tests
+The C++ code requires a compiler with C++17 support and GNU Make.
+
+Build the main executable without running it:
+
 ```bash
 make
 ```
 
-Compile with test output enabled:
+The executable is written to `build/nnet`.
+
+Build if necessary and run the example:
+
+```bash
+make run
+```
+
+Build and run the separate automated test executable:
 
 ```bash
 make test
 ```
 
-The compiled executable is stored at:
+A failing test makes the test executable return a nonzero exit status.
 
-```text
-build/nnet
+The program also accepts a machine-readable output mode:
+
+```bash
+./build/nnet --loss-csv
 ```
+
+In this mode, training writes one `epoch,loss` record per line and suppresses the progress bar and final prediction table.
+
+## Training-Loss Graph
+
+The optional graph requires Python 3 and Matplotlib. Installing Matplotlib inside a virtual environment is recommended:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install matplotlib
+```
+
+Then run:
+
+```bash
+make graph
+```
+
+The Make target starts the network in `--loss-csv` mode and pipes its output to `visualizations/graphing.py`. A graphical display must be available; WSL users can use WSLg.
+
+## Automated Verification
+
+The current tests verify:
+
+- Exact deterministic hidden and output activations
+- Prediction shape and value
+- Binary cross-entropy
+- Expected analytic weight and bias gradients
+- Numerical finite-difference gradients for every fixture parameter
+- `computeGradients()` does not update parameters
+- SGD updates every fixture weight and bias correctly
+
+The numerical gradient check is the strongest correctness gate for the current backpropagation implementation.
 
 ## Current Limitations
 
-Version `0.1` is currently focused on binary classification.
+Version `0.1` remains a binary MLP reference implementation. It does not yet support:
 
-The project does not yet support:
-
-- Train, validation, and test splitting
-- Loss and accuracy tracking
-- Dataset shuffling
+- A validation split or early stopping
+- Shuffling training rows between epochs
 - Mini-batch training
 - Activation functions other than sigmoid
-- Multiple loss functions
+- Loss functions other than binary cross-entropy
 - Optimizers other than basic SGD
-- Multiclass classification
-- Saving or loading trained models
-- Reproducible random initialization
+- Multiple output nodes or multiclass classification
+- Saving and loading model parameters
+- Configurable reproducible weight initialization
+- A general contiguous Tensor type
+- CPU-kernel, SIMD, multithreaded, or GPU backends
 
-It is also not intended to compete with optimized libraries such as PyTorch or TensorFlow. The current focus is correctness, understanding the underlying calculations, and creating a base that can be expanded over time.
+## Next Architectural Milestones
 
-## Next Steps
+The reference MLP will remain available as an independent correctness oracle while the reusable framework is developed beside it.
 
-The next major goals are:
+The planned sequence is:
 
-- Add training and validation metrics
-- Split datasets into training and testing data
-- Shuffle samples between epochs
-- Add better testing for forward and backward calculations
-- Support configurable activation and loss functions
-- Add additional optimizers
-- Save and load network weights
-- Improve the project structure as the network becomes more general
+1. Finish input-contract and DataFrame tests.
+2. Add a contiguous `nnet::Tensor` with shape and row-major strides.
+3. Add standalone tensor operations.
+4. Add `Parameter` for values and gradients.
+5. Introduce the polymorphic `Module` base class.
+6. Rebuild the MLP from modules and compare its outputs and gradients against the reference implementation.
+7. Separate losses, optimizers, datasets, and training orchestration.
+8. Add new architectures and optimized execution backends only after correctness parity.

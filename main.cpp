@@ -4,9 +4,9 @@
 
 #include <iomanip>
 #include <iostream>
+#include <string_view>
 
 const int RANDOM_SEED = 42;
-const bool PLOT_OUTPUT = false;
 const double LEARNING_RATE = 0.1;
 const std::size_t EPOCHS = 1000;
 const std::size_t TARGET_INDEX = 8; // This is the index of the binary target in your dataset.
@@ -35,7 +35,16 @@ void displayPredictions(const std::vector<double>& predictions, const std::vecto
 }
 
 
-int main() {
+int main(int argc, char* argv[]) {
+    bool outputLossCsv = false;
+
+    if (argc == 2 && std::string_view(argv[1]) == "--loss-csv") {
+        outputLossCsv = true;
+    } else if (argc != 1) {
+        std::cerr << "Availble Flags: " << argv[0] << " [--loss-csv]\n";
+        return 1;
+    }
+
     // CONVERT CSV TO MATRIX + SPLIT TARGETS FROM PREDICTORS + TRAIN TEST SPLIT
     //
     DataFrame dataFrame("data/complex_8d_test.csv", TARGET_INDEX);
@@ -47,11 +56,11 @@ int main() {
     // INITIALIZE THE TRAINER BY PASSING IT THE NETWORK TO OPTIMIZE WEIGHTS
     //
     Trainer trainer(network, LEARNING_RATE);
-    trainer.fit(EPOCHS, split.XTrain, split.yTrain, PLOT_OUTPUT);
+    trainer.fit(EPOCHS, split.XTrain, split.yTrain, outputLossCsv);
 
     // GET AND REPORT FINAL PREDICTIONS
     //
-    if (!PLOT_OUTPUT) {
+    if (!outputLossCsv) {
         const auto predictions = network.predict(split.XTest);
         displayPredictions(predictions, split.yTest);
         std::cout << "Test accuracy: " << trainer.getAccuracy(predictions, split.yTest) << '\n';
