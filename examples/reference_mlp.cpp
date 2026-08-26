@@ -1,6 +1,6 @@
-#include "include/dataframe.h"
-#include "include/network.h"
-#include "include/training.h"
+#include "dataframe.h"
+#include "network.h"
+#include "training.h"
 
 #include <iomanip>
 #include <iostream>
