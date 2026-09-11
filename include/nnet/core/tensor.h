@@ -1,3 +1,6 @@
+#ifndef TENSOR_TEST_H
+#define TENSOR_TEST_H
+
 #include <vector>
 #include <stdexcept>
 
@@ -12,8 +15,21 @@ class Tensor {
 		Tensor(Shape shape, std::vector<double> values);
 		std::size_t rank() const;
 		std::size_t numel() const;
+		std::size_t calculateOffset(const Shape& indices) const;	
+
+		const std::vector<double>& getData() const;
+
+		const Shape& strides() const;
+		const Shape& shape() const;
 		
-		const Shape& strides() const;		
+		
+
+		double& at(const Shape& indices);
+		const double& at(const Shape& indices) const;
+
+		Tensor operator+(const Tensor& other) const;
+		Tensor operator*(double scalar) const;
+		Tensor operator-(const Tensor& other) const;
 	private:
 		Shape shape_;
 		Shape strides_;
@@ -21,3 +37,5 @@ class Tensor {
 		
 	};
 }
+
+#endif

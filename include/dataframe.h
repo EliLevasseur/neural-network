@@ -11,6 +11,8 @@
 #include <cassert>
 #include <stdexcept>
 
+#include "nnet/core/tensor.h"
+
 struct splitContainer {
      std::vector<std::vector<double>> XTest;
      std::vector<std::vector<double>> XTrain;
@@ -26,12 +28,16 @@ class DataFrame {
         DataFrame(const std::string& filename, const std::size_t targetIndex);
         
         // GETTERS
-
+        
         const std::vector<std::vector<double>>& getPredictors() const;
         const std::vector<double>& getTargets() const;
         splitContainer trainTestSplit(double splitSize, std::size_t seed = 42) const;
         // METHODS
+    
+        nnet::Tensor flatten(std::vector<double> targets) const;
 
+        nnet::Tensor flatten(std::vector<std::vector<double>> targets) const;
+        
         int dfSize() const;
         void printDataFrame(const std::vector<std::vector<double>>& dfRef) const;
         void printDataFrame(const std::vector<double>& dfRef) const;

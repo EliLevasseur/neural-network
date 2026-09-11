@@ -98,7 +98,6 @@ void DataFrame::printDataFrame(const std::vector<double>& dfRef) const {
 
 
 void DataFrame::printDataFrame(const std::vector<std::vector<double>>& dfRef) const {
-    std::cout << "[" << std::endl;
     for (auto& row : dfRef) {
         std::cout << "[ ";
          for (auto& val : row) {
@@ -106,7 +105,6 @@ void DataFrame::printDataFrame(const std::vector<std::vector<double>>& dfRef) co
         }
         std::cout << "]" << std::endl;
     }
-    std::cout << "\n]";
 }
 
 void DataFrame::splitDataFrame() {
