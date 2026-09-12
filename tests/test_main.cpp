@@ -6,6 +6,7 @@ void runNetworkTests(TestRunner& tests);
 void runTrainingTests(TestRunner& tests);
 void runTensorTests(TestRunner& tests);
 void runDataFrameTests(TestRunner& tests);
+void runOperationTests(TestRunner& tests);
 
 int main() {
     TestRunner tests;
@@ -14,6 +15,7 @@ int main() {
     runTrainingTests(tests);
     runTensorTests(tests);
     runDataFrameTests(tests);
+    runOperationTests(tests);
 
     return tests.finish();
 }

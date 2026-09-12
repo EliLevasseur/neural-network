@@ -7,9 +7,9 @@ REFERENCE_SOURCE := examples/reference_mlp.cpp
 REFERENCE_SOURCES := src/dataframe.cpp src/network.cpp src/training.cpp
 REFERENCE_BINARY := build/reference_mlp
 
-TENSOR_TEST_SOURCES := src/core/tensor.cpp src/core/tensor_dataframe.cpp
+TENSOR_TEST_SOURCES := src/core/tensor.cpp src/core/tensor_dataframe.cpp src/core/tensor_ops.cpp
 
-TEST_SOURCES := tests/test_main.cpp tests/network_test.cpp tests/training_test.cpp tests/tensor_test.cpp tests/dataframe_test.cpp
+TEST_SOURCES := tests/test_main.cpp tests/network_test.cpp tests/training_test.cpp tests/tensor_test.cpp tests/dataframe_test.cpp tests/tensor_ops_tests.cpp
 TEST_BINARY := build/nnet_tests
 
 HEADERS := $(wildcard include/*.h include/nnet/core/*.h)
