@@ -1,4 +1,5 @@
 #include "../../include/nnet/core/tensor.h"
+#include <cstdint>
 #include <utility>
 
 // The Tensor does not currently have thourough testing for indexing COME BACK LATER
@@ -16,6 +17,8 @@ Tensor::Tensor(Tensor::Shape shape, std::vector<double> values) : shape_(std::mo
 	for (auto& val : shape_) {
 		if (val == 0)
 			throw std::invalid_argument("Cannot create a shape with negative dimensions");
+		if (sizeTest > SIZE_MAX / val)
+			throw std::overflow_error("Tensor shape is too large to represent");
 		sizeTest *= val;
 	}
 	
@@ -26,6 +29,8 @@ Tensor::Tensor(Tensor::Shape shape, std::vector<double> values) : shape_(std::mo
 	for (std::size_t i = 0; i < shape_.size() - 1; i++) {
 		std::size_t temp = 1;
 		for (std::size_t j = i + 1; j < shape_.size(); j++) {
+				if (temp > SIZE_MAX / shape_[j])
+					throw std::overflow_error("Tensor stride is too large to represent");
 				temp *= shape_[j];
 }
 		strides_.push_back(temp);

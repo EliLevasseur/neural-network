@@ -1,6 +1,8 @@
 #include "test_utils.h"
 #include "nnet/core/tensor.h"
 
+#include <utility>
+
 
 void runTensorTests(TestRunner& tests) {
 
@@ -133,6 +135,39 @@ void runTensorTests(TestRunner& tests) {
 	const nnet::Tensor differentGroups({1, 4, 2, 1}, {1, 0, 0, 1, 1, 1, 2, -1});
 	expectInvalidArgument([&] { (void)(groupedLeft * differentGroups); },
 		"matmul rejects different batch shapes even with equal matrix counts");
+
+	tests.section("TENSOR COPY, MOVE, AND OVERFLOW SAFETY");
+
+	// Copies must be independent: mutating one must never affect the other.
+	nnet::Tensor original({2, 2}, {1, 2, 3, 4});
+	nnet::Tensor copy = original;
+	copy.at({0, 0}) = 99;
+	tests.expectTrue(original.at({0, 0}) == 1 && copy.at({0, 0}) == 99,
+		"copying a Tensor is independent - mutating the copy leaves the original unchanged");
+
+	// A moved-from Tensor is only guaranteed destructible/assignable - prove
+	// the destination got the data, then prove the source works again once
+	// something new is assigned into it.
+	nnet::Tensor source({2, 2}, {5, 6, 7, 8});
+	nnet::Tensor destination = std::move(source);
+	tests.expectTrue(destination.getData() == std::vector<double>{5, 6, 7, 8} &&
+		destination.shape() == nnet::Tensor::Shape{2, 2},
+		"move-construction transfers the original data to the destination");
+
+	source = nnet::Tensor({1}, {42});
+	tests.expectTrue(source.numel() == 1 && source.at({0}) == 42,
+		"a moved-from Tensor can be reassigned and behaves normally afterward");
+
+	// A shape whose element count cannot fit in size_t must be rejected
+	// before the silent wraparound can produce a corrupted Tensor.
+	bool overflowRejected = false;
+	try {
+		nnet::Tensor huge(nnet::Tensor::Shape{5000000000ULL, 5000000000ULL}, std::vector<double>{0.0});
+	} catch (const std::overflow_error&) {
+		overflowRejected = true;
+	}
+	tests.expectTrue(overflowRejected,
+		"a shape whose element count overflows size_t throws std::overflow_error");
 
 }
 // }}}
