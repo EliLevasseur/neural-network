@@ -5,6 +5,8 @@
 
 namespace nnet {
 
+	// External Use Helpers
+
 	Tensor fill(const Tensor::Shape& shape, double value) {
 		std::size_t total = 1;
 		for (const auto& dim : shape) {
@@ -12,6 +14,7 @@ namespace nnet {
 		}
 		return Tensor(shape, std::vector<double>(total, value));
 	}
+
 
 	Tensor zeros(const Tensor::Shape& shape) {
 		return fill(shape, 0.0);
@@ -26,7 +29,9 @@ namespace nnet {
 		return Tensor(tensor.shape(), out);
 	}
 
-	Tensor sigmoidGrad(const Tensor& tensor) {
+	// Internal Use Helpers
+
+	Tensor sigmoidDerivitive(const Tensor& tensor) {
 		const Tensor activated = sigmoid(tensor);
 		const auto& activatedData = activated.getData();
 		std::vector<double> grad(activatedData.size());
@@ -85,8 +90,6 @@ namespace nnet {
 	}
 
 	// Rank-2 only. This physically copies the elements instead of returning a
-	// reindexed view, because a Tensor exclusively owns its storage and v1 has
-	// no view or aliasing concept (OD-003).
 	// Shapes: input is [rows, columns], result is [columns, rows].
 	Tensor transpose(const Tensor& tensor) {
 		if (tensor.rank() != 2)
@@ -155,6 +158,10 @@ namespace nnet {
 	}
 
 
+	Tensor createBias(std::size_t layerCount) {
+		return zeros(Tensor::Shape({1, layerCount}));
+	}
+
 	Tensor createWeight(const size_t numInputs, const size_t numOutputs) {
 		std::vector<double> weightData(numInputs * numOutputs);
 		for (size_t i = 0; i < weightData.size(); ++i) {
@@ -163,13 +170,22 @@ namespace nnet {
 		return Tensor({numInputs, numOutputs}, weightData);
 	}
 
-	std::vector<Tensor> createWeights(std::vector<size_t> layerSizes) {
-		std::vector<Tensor> vectorOfWeightTensors;
+	std::vector<Paramater> createWeights(std::vector<size_t> layerSizes) {
+		std::vector<Paramater> vectorOfWeightTensors;
 		vectorOfWeightTensors.reserve(layerSizes.size() - 1);
-		for (size_t i = 0; i < vectorOfWeightTensors.size(); i++) {
-			vectorOfWeightTensors[i] = createWeight(layerSizes[i], layerSizes[i + 1]);
+		for (size_t i = 0; i + 1 < layerSizes.size(); i++) {
+			vectorOfWeightTensors.emplace_back(createWeight(layerSizes[i], layerSizes[i + 1]));
 		}
 		return vectorOfWeightTensors;
+	}
+
+	Tensor feedForward(Tensor inputTensor, std::vector<Paramater>& weightParamaters) {
+		Tensor output = sigmoid(inputTensor * weightParamaters[0].value);
+		for (size_t tensor = 1; tensor < weightParamaters.size(); tensor++) {
+			output = sigmoid(output * weightParamaters[tensor].value);
+		}
+		return output;
+
 	}
 }
 
