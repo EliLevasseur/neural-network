@@ -45,10 +45,10 @@ void runOperationTests(TestRunner& tests) {
 	tests.expectNear(numericGrad0, analyticGrad.at({0}), 1.0e-6,
 		"binaryCrossEntropyGrad matches a central finite difference at an interior point");
 
-	const nnet::Tensor sigInput({1}, {0.5});
 	const double sigNumeric =
 		(sigmoid(nnet::Tensor({1}, {0.5 + h})).at({0}) - sigmoid(nnet::Tensor({1}, {0.5 - h})).at({0})) / (2 * h);
-	tests.expectNear(sigNumeric, nnet::sigmoidGrad(sigInput).at({0}), 1.0e-6,
+	const nnet::Tensor sigInput({1}, {0.5});
+	tests.expectNear(sigNumeric, nnet::sigmoidDerivitive(sigInput).at({0}), 1.0e-6,
 		"sigmoidGrad matches a central finite difference");
 
 	const nnet::Tensor matrixForBiasGrad({2, 2}, {1, 2, 3, 4});
@@ -76,7 +76,7 @@ void runOperationTests(TestRunner& tests) {
 	} catch (const std::invalid_argument&) {
 		transposeRejectedRank = true;
 	}
-	tests.expectTrue(transposeRejectedRank, "transpose rejects a non-rank-2 tensor");
+	tests.expectTrue(transposeRejectedRank, "transpose rejects a tensor below rank 2");
 
 	const nnet::Tensor x({2, 2}, {1, 2, 3, 4});
 	const nnet::Tensor w({2, 2}, {5, 6, 7, 8});
@@ -125,4 +125,75 @@ void runOperationTests(TestRunner& tests) {
 	
 	
 		
+	// ---- rank 3: leading dimensions are batch dimensions ----------------
+	// A stack of two matrices, each 2 rows by 3 columns.
+	const nnet::Tensor batched({2, 2, 3}, {1, 2, 3,  4, 5, 6,
+	                                       7, 8, 9, 10, 11, 12});
+
+	const nnet::Tensor batchedTransposed = nnet::transpose(batched);
+	tests.expectTrue(batchedTransposed.shape() == nnet::Tensor::Shape{2, 3, 2} &&
+		batchedTransposed.getData() == std::vector<double>{1, 4, 2, 5, 3, 6,
+		                                                   7, 10, 8, 11, 9, 12},
+		"transpose swaps the last two axes and leaves the batch axis alone");
+
+	nnet::Tensor batchedWithBias = batched;
+	nnet::addBias(batchedWithBias, nnet::Tensor({3}, {100, 200, 300}));
+	tests.expectTrue(batchedWithBias.getData() == std::vector<double>{
+			101, 202, 303, 104, 205, 306,
+			107, 208, 309, 110, 211, 312},
+		"addBias adds to the last axis of every row at any rank");
+
+	const nnet::Tensor batchedBiasGrad =
+		nnet::addBiasGrad(batched, nnet::Tensor({3}, {0, 0, 0}));
+	tests.expectTrue(batchedBiasGrad.shape() == nnet::Tensor::Shape{3} &&
+		batchedBiasGrad.getData() == std::vector<double>{22, 26, 30},
+		"addBiasGrad sums over every leading dimension");
+
+	const nnet::Tensor batchedUpstream({2, 2, 2}, {1, 1, 1, 1, 1, 1, 1, 1});
+	const nnet::Tensor batchedWeightGrad =
+		nnet::matmulGradWeight(batched, batchedUpstream);
+	tests.expectTrue(batchedWeightGrad.shape() == nnet::Tensor::Shape{2, 3, 2} &&
+		batchedWeightGrad.getData() == std::vector<double>{5, 5, 7, 7, 9, 9,
+		                                                   17, 17, 19, 19, 21, 21},
+		"matmulGradWeight works on a batch, inheriting the fix from transpose");
+
+	// A rank-1 bias add now works too, which the rank-2 version could not do.
+	nnet::Tensor biasedVector({3}, {1, 2, 3});
+	nnet::addBias(biasedVector, nnet::Tensor({3}, {10, 20, 30}));
+	tests.expectTrue(biasedVector.getData() == std::vector<double>{11, 22, 33},
+		"addBias works on a rank-1 tensor");
+
+	// ---- one shared weight against a whole batch ------------------------
+	// Three levels of data: 2 groups, 2 rows each, 3 numbers per row. Every
+	// group must go through the SAME weight grid, not one grid each.
+	const nnet::Tensor grouped({2, 2, 3}, {1, 2, 3,  4, 5, 6,
+	                                       7, 8, 9, 10, 11, 12});
+	const nnet::Tensor sharedWeight({3, 2}, {1, 0,
+	                                         0, 1,
+	                                         1, 1});
+	const nnet::Tensor sharedProduct = grouped * sharedWeight;
+	tests.expectTrue(sharedProduct.shape() == nnet::Tensor::Shape{2, 2, 2} &&
+		sharedProduct.getData() == std::vector<double>{4, 5, 10, 11, 16, 17, 22, 23},
+		"matmul reuses a single rank-2 right operand for every batch");
+
+	bool matmulRejectedMiddleRank = false;
+	try {
+		(void)(grouped * nnet::Tensor({2, 3, 2, 1}, {1, 2, 3, 4, 5, 6, 7, 8,
+		                                             9, 10, 11, 12}));
+	} catch (const std::invalid_argument&) {
+		matmulRejectedMiddleRank = true;
+	}
+	tests.expectTrue(matmulRejectedMiddleRank,
+		"matmul still rejects a right operand that is neither matching nor rank 2");
+
+	// ---- summing a shared value's gradient contributions ----------------
+	const nnet::Tensor summedDown = nnet::sumLeadingDimensions(grouped, 2);
+	tests.expectTrue(summedDown.shape() == nnet::Tensor::Shape{2, 3} &&
+		summedDown.getData() == std::vector<double>{8, 10, 12, 14, 16, 18},
+		"sumLeadingDimensions adds the leading axis away");
+
+	tests.expectTrue(
+		nnet::sumLeadingDimensions(grouped, 3).getData() == grouped.getData(),
+		"sumLeadingDimensions leaves a tensor alone when the rank already matches");
+
 }

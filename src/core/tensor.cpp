@@ -119,13 +119,22 @@ Tensor Tensor::operator*(const Tensor& other) const {
             "Matrix multiplication requires rank >= 2");
     } 
 
-    if (rank() != other.shape_.size()) {
-        throw std::invalid_argument("Tensor ranks must match");
+    // The right operand may either match this tensor's rank, pairing each
+    // matrix with its own partner, or be a single rank-2 matrix that every
+    // batch shares. The shared case is what a layer applied across grouped
+    // data needs: one weight used by every group. Copying that weight once
+    // per group instead would break the link between the values the forward
+    // pass read and the ones an optimizer later updates.
+    if (other.shape_.size() != rank() && other.shape_.size() != 2) {
+        throw std::invalid_argument(
+            "Right operand must match the left rank or be rank 2");
     }
 
-    for (std::size_t axis = 0; axis < rank() - 2; ++axis) {
-        if (shape_[axis] != other.shape_[axis]) {
-            throw std::invalid_argument("Batch dimensions must match");
+    if (other.shape_.size() == rank()) {
+        for (std::size_t axis = 0; axis < rank() - 2; ++axis) {
+            if (shape_[axis] != other.shape_[axis]) {
+                throw std::invalid_argument("Batch dimensions must match");
+            }
         }
     }
 
@@ -133,9 +142,9 @@ Tensor Tensor::operator*(const Tensor& other) const {
 	// preceding values represent batch dimensions.
     const std::size_t rows = shape_[rank() - 2];
     const std::size_t inner = shape_[rank() - 1];
-    const std::size_t cols = other.shape_[rank() - 1];
+    const std::size_t cols = other.shape_[other.shape_.size() - 1];
 
-    if (inner != other.shape_[rank() - 2]) {
+    if (inner != other.shape_[other.shape_.size() - 2]) {
         throw std::invalid_argument(
             "Left columns must equal right rows");
     }
@@ -145,6 +154,10 @@ Tensor Tensor::operator*(const Tensor& other) const {
 
 	// Each matrix contains rows * inner elements; divide the total to count # of matrices.
     const std::size_t batches = data_.size() / rows / inner;
+
+    // How many matrices the right operand holds. One means it is shared by
+    // every batch on the left.
+    const std::size_t rightBatches = other.data_.size() / inner / cols;
     std::vector<double> values(batches * rows * cols, 0.0);
 
     // Multiply each corresponding pair of matrices.
@@ -153,7 +166,10 @@ Tensor Tensor::operator*(const Tensor& other) const {
 
 		// Flat position where this batch's matrix begins in each data vector.
 		const std::size_t leftStart = batch * rows * inner;
-		const std::size_t rightStart = batch * inner * cols;
+		// A shared right operand never advances: every batch reads the
+		// same matrix.
+		const std::size_t rightStart =
+			(rightBatches == 1) ? 0 : batch * inner * cols;
 		const std::size_t outputStart = batch * rows * cols;
 
 		// Visit every position in the output matrix.
@@ -194,4 +210,17 @@ Tensor Tensor::operator-(const Tensor& other) const {
 	return Tensor(shape_, std::move(values));
 }
 
+void Tensor::inplaceMultiplication(const Tensor& otherTensor) {
+
+	if (otherTensor.shape_ != shape_)
+		throw std::invalid_argument("Tensors must be of the same shape");
+
+	for (size_t val = 0; val < otherTensor.numel(); val++) {
+      		data_[val] *= otherTensor.getData()[val];
+		}
+	}
+
 }
+
+
+

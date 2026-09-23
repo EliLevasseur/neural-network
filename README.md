@@ -1,268 +1,312 @@
-# MLP Neural Network From Scratch
+# nnet: a neural network framework built from scratch in C++
 
-This project is a from-scratch C++ implementation of a multilayer perceptron. Its purpose is to make the calculations inside a neural network understandable and testable before the project grows into a more general neural-network framework.
+This repository is a from-scratch C++ neural-network project with two goals: to
+make every calculation inside a neural network understandable and testable, and
+to grow a reusable framework whose contracts survive past one example model.
 
-Version `0.1` is the reference model. It supports fully connected sigmoid layers, binary classification, backpropagation, stochastic gradient descent, evaluation on held-out rows, and deterministic numerical gradient tests.
+It contains **two systems that coexist on purpose**.
 
-## Current Features
+The **reference multilayer perceptron** is a working binary classifier written
+with nested `std::vector`. It is finished, verified, and deliberately frozen. Its
+job is to be a correctness oracle: an independently trusted source of numbers to
+check the new framework against.
 
-- Numeric CSV loading without a header row
-- Configurable target-column index
-- Reproducible shuffled train/test splitting with an optional seed
-- Configurable fully connected layer sizes
-- Weights stored as `weights[node][input]`
-- Sigmoid activations
-- Feedforward prediction
-- Binary cross-entropy loss
-- Binary classification accuracy
-- Backpropagation through hidden and output layers
-- Per-sample stochastic gradient descent
-- Epoch-based training progress
-- Optional live training-loss visualization
-- Separate automated test executable
-- Deterministic forward-pass, backpropagation, numerical-gradient, and SGD tests
+The **tensor framework** is the reusable core being built beside it. It is not a
+rewrite of the reference model. It is a separate set of components: a `Tensor`,
+checked operations, `Parameter`, and `Dense`. They are proven correct by
+reproducing the reference model's numbers exactly.
 
-## Data Processing
+## Current state
 
-Each CSV row contains numeric predictors and one binary target. The constructor receives the zero-based index of the target column:
+Everything below is checked by `make test`, which builds three independent
+binaries and runs 157 assertions.
+
+| Suite | Checks | Covers |
+|---|---|---|
+| `make test-reference` | 36 | the legacy MLP: forward values, loss, analytic and numerical gradients, SGD |
+| `make test-tensor` | 83 | `Tensor`, its operations, `DataFrame` conversion, and `Dense` |
+| `make test-parity` | 38 | the framework reproducing the reference model's gradients and weight updates |
+
+All three pass warning-clean under `-Wall -Wextra -Wpedantic`, and identically
+under a checked-library build (`-D_GLIBCXX_DEBUG -D_GLIBCXX_ASSERTIONS`) and a
+release build (`-O2 -DNDEBUG`).
+
+### What parity actually proves
+
+The parity suite builds the same model twice, once with the legacy `Network` and
+once from `Dense` layers, pins both to identical weights, and compares:
+
+- every weight gradient and every bias gradient, to a tolerance of `1e-12`;
+- every weight and bias after one stochastic gradient descent step;
+- the same again for a three-layer network, through a loop that does not know
+  how many layers there are.
+
+The reference model's 1000-epoch loss trace also still hashes to the same value
+it did before any of this work started, so the oracle itself is untouched.
+
+**What it does not yet prove:** a full training run. Parity covers one sample,
+one forward pass, one backward pass, and one update. Multi-epoch training
+through the framework does not exist yet.
+
+## Building and running
+
+Requires a C++17 compiler and GNU Make. Built with GCC 16.
+
+```bash
+make                 # build build/reference_mlp
+make run             # build and run the reference model
+make test            # run all three suites
+make test-reference  # legacy MLP only, links zero tensor code
+make test-tensor     # Tensor, operations, and Dense
+make test-parity     # framework against the oracle
+make tensor-mlp      # build and run the tensor-based example
+make graph           # plot the reference model's training loss (needs matplotlib)
+```
+
+The reference model also emits machine-readable output:
+
+```bash
+./build/reference_mlp --loss-csv
+```
+
+`make test-reference` deliberately links no tensor source file at all, so work in
+progress on the framework cannot break the oracle.
+
+## The tensor framework
+
+### Tensor
+
+An owning, contiguous, row-major tensor of `double`.
 
 ```cpp
-DataFrame dataFrame("data/binary_test.csv", 3);
+nnet::Tensor matrix({2, 3}, {1, 2, 3, 4, 5, 6});
+
+matrix.rank();        // 2
+matrix.numel();       // 6
+matrix.shape();       // {2, 3}
+matrix.strides();     // {3, 1}
+matrix.at({1, 2});    // 6
 ```
 
-For a row shaped like:
+Contracts it holds:
 
-```text
-predictor_0,predictor_1,predictor_2,target
-```
+- `at()` requires exactly as many indices as the tensor has axes, and checks
+  every one against its own bound.
+- Construction rejects a shape whose element count does not match the data, and
+  throws `std::overflow_error` rather than wrapping around on an unrepresentable
+  shape.
+- Copy and move are explicit. Copies are independent.
+- `getData()` is const-only, so the storage cannot be resized from outside.
+- No views, no aliasing, no broadcasting. Rank zero and zero-sized dimensions
+  are rejected rather than supported.
 
-the target index is `3`. The target does not need to be the final column; the selected value is removed from every predictor row and stored separately.
+### Operations
 
-Access the complete predictor and target collections with:
+Free functions in `nnet/core/tensor_ops.h`, deliberately not methods, so that
+what owns state and what computes values stay separate.
+
+**Rank contract:** leading dimensions are batch dimensions and are left
+untouched. An operation acts on the last axis, or on the last two for anything
+matrix-shaped. Nothing broadcasts.
+
+| Forward | Gradient |
+|---|---|
+| `sigmoid` | `sigmoidDerivitive` |
+| `addBias` | `addBiasGrad` |
+| `operator*` (matrix multiply) | `matmulGradWeight`, `matmulGradInput` |
+| `binaryCrossEntropy` | `binaryCrossEntropyGrad` |
+
+Also `transpose`, `sum`, `sumLeadingDimensions`, `fill`, `zeros`, and the
+`Tensor` operators `+`, `-`, scalar `*`, and `inplaceMultiplication`.
+
+Every gradient above is checked against a central finite difference, not just
+against a hand-computed fixture.
+
+Matrix multiply takes either two operands of equal rank, pairing each matrix
+with its own, or a higher-rank left operand against a single rank-2 right
+operand that every group shares. The second form is what a layer applied across
+grouped data needs.
+
+### Parameter
+
+One trainable thing: a value and the gradient belonging to it, in one object so
+they cannot be mismatched.
 
 ```cpp
-const auto& predictors = dataFrame.getPredictors();
-const auto& targets = dataFrame.getTargets();
+nnet::Parameter weight(nnet::Tensor({2, 2}, {0.1, 0.4, -0.2, 0.3}));
+weight.value;   // the numbers
+weight.grad;    // same shape, zero-filled at birth
 ```
 
-Create shuffled training and testing sets with:
+Copying a `Parameter` is a compile error. An optimizer has to update the exact
+object the forward pass read, so a copy would be silently useless.
+
+### Dense
+
+One fully connected layer. Owns its weight and bias, applies no activation, and
+caches nothing.
 
 ```cpp
-const auto split = dataFrame.trainTestSplit(0.8, 42);
+nnet::Dense layer(3, 2);                  // 3 inputs, 2 outputs
+
+nnet::Tensor output = layer.forward(input);
+nnet::Tensor inputGradient = layer.backward(savedInput, gradientFromAbove);
+
+for (nnet::Parameter* p : layer.parameters()) { /* weight, then bias */ }
 ```
 
-The first argument is the fraction assigned to training. The seed makes the row split reproducible. The returned `splitContainer` owns:
+`forward` is `const`, which is load-bearing rather than decorative: a const
+method cannot assign to a member, so the layer physically cannot stash values
+between calls. `backward` takes the forward pass's input back as an argument for
+the same reason.
 
-```text
-XTrain
-yTrain
-XTest
-yTest
-```
-
-Training must use only `XTrain` and `yTrain`. Evaluate the finished model with `XTest` and `yTest`.
-
-## Network Structure
-
-The network stores a vector of fully connected `Layer` objects. Each layer owns a weight matrix and a bias vector.
-
-Create a network by providing every layer size, including the input size:
+The activation lives outside the layer, chosen by the caller:
 
 ```cpp
-Network network({3, 5, 3, 1});
-```
-
-This topology contains three inputs, hidden layers with five and three nodes, and one binary output node.
-
-Each node calculates:
-
-```text
-weighted sum = inputs * weights + bias
-activation   = sigmoid(weighted sum)
-```
-
-The final sigmoid output is interpreted as a probability:
-
-```text
-probability >= 0.5  -> class 1
-probability <  0.5  -> class 0
-```
-
-## Training
-
-Construct `Trainer` by passing the model first and the learning rate second:
-
-```cpp
-Trainer trainer(network, 0.09);
-trainer.fit(1000, split.XTrain, split.yTrain);
-```
-
-For every training row, the trainer performs a forward pass, calculates deltas and weight gradients, and then applies SGD.
-
-For a sigmoid output with binary cross-entropy, the output delta simplifies to:
-
-```text
-output delta = prediction - target
-```
-
-Generate held-out predictions and metrics after training:
-
-```cpp
-const auto predictions = network.predict(split.XTest);
-
-const double accuracy =
-    trainer.getAccuracy(predictions, split.yTest);
-
-const double loss =
-    trainer.binaryCrossEntropy(predictions, split.yTest);
-```
-
-## Complete Example
-
-```cpp
-#include "include/dataframe.h"
-#include "include/network.h"
-#include "include/training.h"
-
-int main() {
-    DataFrame dataFrame("data/binary_test.csv", 3);
-    const auto split = dataFrame.trainTestSplit(0.8, 42);
-
-    Network network({3, 5, 3, 1});
-    Trainer trainer(network, 0.09);
-
-    trainer.fit(1000, split.XTrain, split.yTrain);
-
-    const auto predictions = network.predict(split.XTest);
-    const double accuracy =
-        trainer.getAccuracy(predictions, split.yTest);
-    const double loss =
-        trainer.binaryCrossEntropy(predictions, split.yTest);
-
-    return 0;
+nnet::Tensor activation = input;
+for (const nnet::Dense& layer : layers) {
+    activation = nnet::sigmoid(layer.forward(activation));
 }
 ```
 
-## Project Structure
+## The reference model
+
+Still buildable, still the oracle. Weights are `weights[node][input]`, one
+`Layer` per entry, sigmoid throughout, binary cross-entropy, per-sample SGD.
+
+```cpp
+DataFrame dataFrame("data/binary_test.csv", 3);
+const auto split = dataFrame.trainTestSplit(0.8, 42);
+
+Network network({3, 5, 3, 1});
+Trainer trainer(network, 0.09);
+trainer.fit(1000, split.XTrain, split.yTrain);
+
+const auto predictions = network.predict(split.XTest);
+const double accuracy = trainer.getAccuracy(predictions, split.yTest);
+```
+
+Its verified behaviour covers only the repository's fixed test fixtures. It is
+not a safe general-purpose API: malformed files, ragged rows, and mismatched
+shapes are not all checked, and some checks are assertions that vanish in a
+release build.
+
+## Project structure
 
 ```text
 neural-network/
-|-- data/
-|   |-- binary_test.csv
-|   `-- complex_8d_test.csv
+|-- data/                       small deterministic CSV fixtures
 |-- include/
-|   |-- dataframe.h
-|   |-- network.h
-|   `-- training.h
-|-- src/
-|   |-- dataframe.cpp
-|   |-- network.cpp
-|   `-- training.cpp
-|-- tests/
-|   |-- network_test.cpp
-|   |-- test_main.cpp
-|   |-- test_utils.h
-|   `-- training_test.cpp
-|-- visualizations/
-|   `-- graphing.py
-|-- main.cpp
-|-- Makefile
-`-- README.md
+|   |-- dataframe.h             CSV loading and train/test split
+|   |-- network.h               legacy MLP
+|   |-- training.h              legacy trainer
+|   `-- nnet/
+|       |-- core/
+|       |   |-- tensor.h        the Tensor value type
+|       |   `-- tensor_ops.h    operations and their gradients
+|       `-- nn/
+|           |-- parameter.h     a value plus its gradient
+|           `-- dense.h         one fully connected layer
+|-- src/                        implementations, mirroring include/
+|-- examples/
+|   |-- reference_mlp.cpp       the legacy model, build/reference_mlp
+|   `-- tensor_mlp.cpp          Dense layers end to end, build/tensor_mlp
+|-- tests/                      three independent suites and their entry points
+|-- visualizations/graphing.py  training-loss plot
+`-- Makefile
 ```
 
-## Building and Running
+## Platform support
 
-The C++ code requires a compiler with C++17 support and GNU Make.
+Developed and verified on Linux and macOS. Windows is not supported yet, and a
+Visual Studio build is planned.
 
-Build the main executable without running it:
+**The build assumes a POSIX shell.** Every target calls `mkdir -p` and runs its
+binary as `./build/name`, neither of which works in `cmd.exe`. That alone stops
+`make` from running natively on Windows, which is why a Visual Studio project is
+the route in rather than patching the Makefile.
 
-```bash
-make
+**Weight initialization is not portable.** Both weight generators call `rand()`
+and divide by `RAND_MAX`:
+
+```cpp
+weight = ((double)rand() / RAND_MAX) - 0.5;
 ```
 
-The executable is written to `build/nnet`.
+`RAND_MAX` is implementation-defined. The standard only promises it is at least
+32767, and the real values differ sharply:
 
-Build if necessary and run the example:
+| Toolchain | `RAND_MAX` | Distance between adjacent weights |
+|---|---|---|
+| glibc and macOS libc | 2147483647 | 0.00000000047 |
+| MSVC | 32767 | 0.0000305 |
 
-```bash
-make run
-```
+So on Windows every weight is drawn from a pool of 32768 values instead of two
+billion, roughly 65000 times coarser. Drawing 4096 weights from that pool
+produces around 240 exact duplicates, where on Linux duplicates are effectively
+impossible.
 
-Build and run the separate automated test executable:
+The generators themselves also differ, so the same code produces entirely
+different starting weights on each platform. There is no `srand()` call anywhere
+either, meaning the sequence is fixed at the standard's default seed of 1 and
+cannot be chosen. Replacing this with a seeded `std::mt19937` and an explicit
+distribution fixes both problems at once, and is listed under the next steps
+below. `DataFrame::trainTestSplit` already does exactly that, so the data split
+is portable even though the weights are not.
 
-```bash
-make test
-```
+**The training-loss graph needs a desktop session.** `make graph` pipes the
+model's output into matplotlib, which needs the package installed and an
+interactive display:
 
-A failing test makes the test executable return a nonzero exit status.
+- macOS works with no setup beyond installing matplotlib.
+- Linux needs a display. Under WSL that means WSLg.
+- Windows has no target for it, since the pipeline is a shell pipe calling
+  `python3`, which on Windows is usually `python` or `py`.
 
-The program also accepts a machine-readable output mode:
+Nothing in `visualizations/graphing.py` is platform-specific. What varies is the
+environment around it.
 
-```bash
-./build/nnet --loss-csv
-```
+## Not built yet
 
-In this mode, training writes one `epoch,loss` record per line and suppresses the progress bar and final prediction table.
+- A training loop through the framework. Forward, backward, and the update rule
+  all exist and are verified, but nothing runs them over epochs yet.
+- An optimizer as its own component. The update rule is three verified lines
+  inside the parity test.
+- Automatic differentiation. Every gradient is currently applied by hand.
+- A shared base class for layers. There is only one kind of layer, so there is
+  nothing to unify yet.
+- Seeded weight initialization. Weights come from the global random function,
+  which makes training runs impossible to reproduce deliberately.
+- Activations other than sigmoid, losses other than binary cross-entropy,
+  mini-batching, serialization, and any optimized or accelerated backend.
 
-## Training-Loss Graph
+## Where this is going
 
-The optional graph requires Python 3 and Matplotlib. Installing Matplotlib inside a virtual environment is recommended:
+**Immediately next, in order:**
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install matplotlib
-```
+1. A training loop and an optimizer component. Forward, backward, and the update
+   rule all exist and are checked against the oracle. Nothing runs them over
+   epochs yet, so no model has actually been trained through the framework.
+2. Seeded weight initialization, so two runs can be compared deliberately rather
+   than by accident of the C library's default random sequence.
+3. Reverse-mode automatic differentiation. Applying four gradient rules by hand
+   is fine. Applying forty is where hand-rolled frameworks fall over, and it is
+   the thing that makes every later model affordable.
 
-Then run:
+**Long term goals:**
 
-```bash
-make graph
-```
+- parameters, modules, losses, optimizers and training utilities as separate
+  components rather than one fused trainer;
+- deterministic data handling and metrics;
+- serialization, so a trained model can be saved and loaded;
+- embedding, convolution, normalization, attention, and recurrent building
+  blocks, each added when its prerequisites actually exist;
+- a readable CPU reference kernel kept alongside optimized ones, with optional
+  accelerator backends behind the same tested operation contracts;
+- reproducible testing, benchmarking, and documentation throughout.
 
-The Make target starts the network in `--loss-csv` mode and pipes its output to `visualizations/graphing.py`. A graphical display must be available; WSL users can use WSLg.
-
-## Automated Verification
-
-The current tests verify:
-
-- Exact deterministic hidden and output activations
-- Prediction shape and value
-- Binary cross-entropy
-- Expected analytic weight and bias gradients
-- Numerical finite-difference gradients for every fixture parameter
-- `computeGradients()` does not update parameters
-- SGD updates every fixture weight and bias correctly
-
-The numerical gradient check is the strongest correctness gate for the current backpropagation implementation.
-
-## Current Limitations
-
-Version `0.1` remains a binary MLP reference implementation. It does not yet support:
-
-- A validation split or early stopping
-- Shuffling training rows between epochs
-- Mini-batch training
-- Activation functions other than sigmoid
-- Loss functions other than binary cross-entropy
-- Optimizers other than basic SGD
-- Multiple output nodes or multiclass classification
-- Saving and loading model parameters
-- Configurable reproducible weight initialization
-- A general contiguous Tensor type
-- CPU-kernel, SIMD, multithreaded, or GPU backends
-
-## Next Architectural Milestones
-
-The reference MLP will remain available as an independent correctness oracle while the reusable framework is developed beside it.
-
-The planned sequence is:
-
-1. Finish input-contract and DataFrame tests.
-2. Add a contiguous `nnet::Tensor` with shape and row-major strides.
-3. Add standalone tensor operations.
-4. Add `Parameter` for values and gradients.
-5. Introduce the polymorphic `Module` base class.
-6. Rebuild the MLP from modules and compare its outputs and gradients against the reference implementation.
-7. Separate losses, optimizers, datasets, and training orchestration.
-8. Add new architectures and optimized execution backends only after correctness parity.
+The target is a core that can carry at least two structurally different model
+families. Language, vision, game, and quantitative models should be able to
+share operations and components without being forced into one inheritance tree.
+Reproducing the binary classifier is a verification step along the way, not the
+ceiling.

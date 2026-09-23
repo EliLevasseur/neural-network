@@ -52,13 +52,31 @@ namespace nnet {
 
 	void addBias(Tensor& tensor, const Tensor& bias) {
 
-		if (bias.shape()[bias.rank() - 1] != tensor.shape()[tensor.rank() - 1]) {
-			throw std::invalid_argument("Bias must be tensor one dimension less than the input tensor with the same size as the last dimension of the input tensor");
+		if (bias.rank() != 1)
+			throw std::invalid_argument("Bias must be rank 1");
+
+		const std::size_t width = bias.shape()[0];
+
+		if (tensor.shape()[tensor.rank() - 1] != width) {
+			throw std::invalid_argument("Bias length must equal the last dimension of the tensor");
 		}
-		
-		for (size_t row = 0; row < tensor.shape()[tensor.rank() - 2]; row++) {
-			for (size_t col = 0; col < tensor.shape()[tensor.rank() - 1]; col++) {
-				tensor.at({row, col}) += bias.at({col});
+
+		// Whatever the rank, the tensor is a stack of rows `width` wide.
+		// Every leading dimension is a batch dimension and is walked by the
+		// odometer at the bottom of the loop.
+		const std::size_t rows = tensor.numel() / width;
+		Tensor::Shape indices(tensor.rank(), 0);
+
+		for (std::size_t row = 0; row < rows; row++) {
+			for (std::size_t col = 0; col < width; col++) {
+				indices[tensor.rank() - 1] = col;
+				tensor.at(indices) += bias.at({col});
+			}
+
+			// Advance every axis except the last, carrying like an odometer.
+			for (std::size_t axis = tensor.rank() - 1; axis-- > 0;) {
+				if (++indices[axis] < tensor.shape()[axis]) break;
+				indices[axis] = 0;
 			}
 		}
 	}
@@ -68,52 +86,86 @@ namespace nnet {
 	// rule therefore sums the upstream gradient down that whole column.
 	// Shapes: upstreamGrad is [rows, columns], bias is [columns], result is [columns].
 	Tensor addBiasGrad(const Tensor& upstreamGrad, const Tensor& bias) {
-		if (upstreamGrad.rank() != 2)
-			throw std::invalid_argument("addBiasGrad requires a rank-2 upstream gradient");
-
 		if (bias.rank() != 1)
 			throw std::invalid_argument("addBiasGrad requires a rank-1 bias");
 
-		const std::size_t rows = upstreamGrad.shape()[0];
-		const std::size_t columns = upstreamGrad.shape()[1];
+		const std::size_t width = bias.shape()[0];
 
-		if (bias.shape()[0] != columns)
+		if (upstreamGrad.shape()[upstreamGrad.rank() - 1] != width)
 			throw std::invalid_argument("Bias length must equal the last dimension of the upstream gradient");
 
-		std::vector<double> grad(columns, 0.0);
-		for (std::size_t row = 0; row < rows; row++) {
-			for (std::size_t col = 0; col < columns; col++) {
-				grad[col] += upstreamGrad.at({row, col});
-			}
+		// The same bias value is reused once per row, at every leading
+		// dimension, so its gradient is the sum down that whole column.
+		const auto& data = upstreamGrad.getData();
+		std::vector<double> grad(width, 0.0);
+		for (std::size_t i = 0; i < data.size(); i++) {
+			grad[i % width] += data[i];
 		}
 		return Tensor(bias.shape(), std::move(grad));
 	}
 
-	// Rank-2 only. This physically copies the elements instead of returning a
-	// Shapes: input is [rows, columns], result is [columns, rows].
+	// Swaps the last two axes. Every leading dimension is a batch dimension
+	// and is left exactly as it is, matching what matmul already does.
+	// Copies rather than returning a view, since a Tensor owns its storage.
 	Tensor transpose(const Tensor& tensor) {
-		if (tensor.rank() != 2)
-			throw std::invalid_argument("transpose requires a rank-2 tensor");
+		if (tensor.rank() < 2)
+			throw std::invalid_argument("transpose requires rank 2 or higher");
 
-		const std::size_t rows = tensor.shape()[0];
-		const std::size_t columns = tensor.shape()[1];
+		const std::size_t rows = tensor.shape()[tensor.rank() - 2];
+		const std::size_t columns = tensor.shape()[tensor.rank() - 1];
+		const std::size_t matrices = tensor.numel() / rows / columns;
 
+		const auto& data = tensor.getData();
 		std::vector<double> values(tensor.numel());
-		for (std::size_t row = 0; row < rows; row++) {
-			for (std::size_t col = 0; col < columns; col++) {
-				// Input element [row, col] becomes output element [col, row]. The
-				// output has `rows` columns, so that lands at flat position
-				// col * rows + row.
-				values[col * rows + row] = tensor.at({row, col});
+
+		for (std::size_t matrix = 0; matrix < matrices; matrix++) {
+			const std::size_t start = matrix * rows * columns;
+			for (std::size_t row = 0; row < rows; row++) {
+				for (std::size_t col = 0; col < columns; col++) {
+					values[start + col * rows + row] =
+						data[start + row * columns + col];
+				}
 			}
 		}
-		return Tensor(Tensor::Shape{columns, rows}, std::move(values));
+
+		Tensor::Shape outputShape = tensor.shape();
+		std::swap(outputShape[tensor.rank() - 2], outputShape[tensor.rank() - 1]);
+		return Tensor(std::move(outputShape), std::move(values));
+	}
+
+	// Adds up the leading dimensions until only `targetRank` axes remain.
+	//
+	// This is what a shared value needs. When one weight is used by every
+	// group in a batch, each group produces its own contribution to that
+	// weight's gradient, and the contributions have to be added together.
+	// addBiasGrad does the same thing for the same reason.
+	Tensor sumLeadingDimensions(const Tensor& tensor, std::size_t targetRank) {
+		if (targetRank == 0 || targetRank > tensor.rank())
+			throw std::invalid_argument(
+				"targetRank must be between 1 and the tensor's own rank");
+
+		if (targetRank == tensor.rank())
+			return tensor;
+
+		Tensor::Shape outputShape(tensor.shape().end() - static_cast<long>(targetRank),
+		                          tensor.shape().end());
+
+		std::size_t outputSize = 1;
+		for (const auto& dimension : outputShape) {
+			outputSize *= dimension;
+		}
+
+		const auto& data = tensor.getData();
+		std::vector<double> values(outputSize, 0.0);
+		for (std::size_t i = 0; i < data.size(); i++) {
+			values[i % outputSize] += data[i];
+		}
+		return Tensor(std::move(outputShape), std::move(values));
 	}
 
 	// For Z = X * W, the weight gradient is X-transpose * dL/dZ.
 	// Shapes: X is [M, K] and dL/dZ is [M, N], so X-transpose is [K, M] and the
 	// product is [K, N], which is exactly W's shape. Rank and inner-dimension
-	// errors are raised by transpose and by operator* respectively.
 	Tensor matmulGradWeight(const Tensor& input, const Tensor& upstreamGrad) {
 		return transpose(input) * upstreamGrad;
 	}
@@ -159,7 +211,7 @@ namespace nnet {
 
 
 	Tensor createBias(std::size_t layerCount) {
-		return zeros(Tensor::Shape({1, layerCount}));
+		return zeros(Tensor::Shape({layerCount}));
 	}
 
 	Tensor createWeight(const size_t numInputs, const size_t numOutputs) {
@@ -170,23 +222,17 @@ namespace nnet {
 		return Tensor({numInputs, numOutputs}, weightData);
 	}
 
-	std::vector<Paramater> createWeights(std::vector<size_t> layerSizes) {
-		std::vector<Paramater> vectorOfWeightTensors;
+	std::vector<Tensor> createWeights(std::vector<size_t> layerSizes) {
+		std::vector<Tensor> vectorOfWeightTensors;
 		vectorOfWeightTensors.reserve(layerSizes.size() - 1);
 		for (size_t i = 0; i + 1 < layerSizes.size(); i++) {
-			vectorOfWeightTensors.emplace_back(createWeight(layerSizes[i], layerSizes[i + 1]));
+			vectorOfWeightTensors.push_back(createWeight(layerSizes[i], layerSizes[i + 1]));
 		}
 		return vectorOfWeightTensors;
 	}
 
-	Tensor feedForward(Tensor inputTensor, std::vector<Paramater>& weightParamaters) {
-		Tensor output = sigmoid(inputTensor * weightParamaters[0].value);
-		for (size_t tensor = 1; tensor < weightParamaters.size(); tensor++) {
-			output = sigmoid(output * weightParamaters[tensor].value);
-		}
-		return output;
+	
 
-	}
 }
 
 

@@ -22,6 +22,8 @@ class Tensor {
 		const Shape& strides() const;
 		const Shape& shape() const;
 		
+		void inplaceMultiplication(const Tensor& otherTensor);
+		
 		// Methods
 		double& at(const Shape& indices);
 		const double& at(const Shape& indices) const;

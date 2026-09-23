@@ -39,6 +39,44 @@ void runTensorTests(TestRunner& tests) {
 	tests.expectTrue(tensor.at({2, 1}) == 1, "at() calls 1 at index {2, 1}");
 	tests.expectTrue(tensor.shape() == nnet::Tensor::Shape{3, 2}, "shape == {3, 2}");
 
+	nnet::Tensor inplaceMultiplicationTest1({2, 2}, {1, 2, 3, 4});
+
+	const nnet::Tensor inplaceMultiplicationTest2({2, 2}, {2, 1, 4, 3});
+
+	const nnet::Tensor inplaceMulExpectexed({2, 2}, {2, 2, 12, 12});
+
+	inplaceMultiplicationTest1.inplaceMultiplication(inplaceMultiplicationTest2);
+
+	tests.expectTrue(inplaceMultiplicationTest1.getData() == inplaceMulExpectexed.getData(),
+		  "inplace multiplication works on 2x2 tensors");
+
+	// Multiplying tensors of different shapes must be refused. Without this
+	// the loop would write past the end of the smaller tensor's storage,
+	// which corrupts memory silently rather than failing.
+	bool inplaceMulRejectedMismatch = false;
+	try {
+		nnet::Tensor smaller({2, 2}, {1, 2, 3, 4});
+		const nnet::Tensor larger({3, 3}, {1, 2, 3, 4, 5, 6, 7, 8, 9});
+		smaller.inplaceMultiplication(larger);
+	} catch (const std::invalid_argument&) {
+		inplaceMulRejectedMismatch = true;
+	}
+	tests.expectTrue(inplaceMulRejectedMismatch,
+		"inplace multiplication rejects tensors of different shapes");
+
+	// Equal element counts are not enough: {2,3} and {3,2} both hold six
+	// values but mean different things, so this must be refused too.
+	bool inplaceMulRejectedTranspose = false;
+	try {
+		nnet::Tensor twoByThree({2, 3}, {1, 2, 3, 4, 5, 6});
+		const nnet::Tensor threeByTwo({3, 2}, {1, 2, 3, 4, 5, 6});
+		twoByThree.inplaceMultiplication(threeByTwo);
+	} catch (const std::invalid_argument&) {
+		inplaceMulRejectedTranspose = true;
+	}
+	tests.expectTrue(inplaceMulRejectedTranspose,
+		"inplace multiplication rejects equal element counts with different shapes");
+
 	// test 3d shape
 	tests.expectTrue(tensor3d.strides() == std::vector<size_t>{4, 2, 1}, "strides(shape{2, 2, 2}) --> {2, 2, 1}");
 
@@ -168,6 +206,10 @@ void runTensorTests(TestRunner& tests) {
 	}
 	tests.expectTrue(overflowRejected,
 		"a shape whose element count overflows size_t throws std::overflow_error");
+
+
+
+
 
 }
 // }}}
