@@ -20,6 +20,8 @@ namespace nnet {
 		return fill(shape, 0.0);
 	}
 
+	// ACTIVATIONS
+
 	Tensor sigmoid(const Tensor& tensor) {
 		const auto& input_data = tensor.getData();
 		std::vector<double> out(input_data.size());

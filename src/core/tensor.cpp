@@ -32,15 +32,15 @@ Tensor::Tensor(Tensor::Shape shape, std::vector<double> values) : shape_(std::mo
 				if (temp > SIZE_MAX / shape_[j])
 					throw std::overflow_error("Tensor stride is too large to represent");
 				temp *= shape_[j];
-}
+		}
 		strides_.push_back(temp);
-	}
+		}
 	strides_.push_back(1);
 	}
 
 // ++++++++++++++++ GETTERS ++++++++++++++++++
 
-std::size_t Tensor::rank() const{
+std::size_t Tensor::rank() const {
 	return shape_.size();
 	}
 

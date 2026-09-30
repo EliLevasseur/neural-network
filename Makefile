@@ -29,7 +29,7 @@ PARITY_TEST_BINARY := build/parity_tests
 TENSOR_MLP_SOURCE := examples/tensor_mlp.cpp
 TENSOR_MLP_BINARY := build/tensor_mlp
 
-HEADERS := $(wildcard include/*.h include/nnet/core/*.h include/nnet/nn/*.h)
+HEADERS := $(wildcard include/*.h include/nnet/core/*.h include/nnet/nn/*.h include/optim/*.h)
 
 .PHONY: build run test test-reference test-tensor test-parity tensor-mlp graph
 
@@ -80,6 +80,6 @@ $(PARITY_TEST_BINARY): $(PARITY_TEST_SOURCES) tests/test_utils.h $(NETWORK_SOURC
 
 # The Tensor example needs DataFrame for CSV loading plus every Tensor
 # compilation unit. It never touches the legacy Network or Trainer.
-$(TENSOR_MLP_BINARY): $(TENSOR_MLP_SOURCE) $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) $(HEADERS)
+$(TENSOR_MLP_BINARY): $(TENSOR_MLP_SOURCE) $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) $(HEADERS) src/optim/sgd.cpp
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) $(TENSOR_MLP_SOURCE) $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) -o $(TENSOR_MLP_BINARY)
+	$(CXX) $(CXXFLAGS) $(TENSOR_MLP_SOURCE) $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) src/optim/sgd.cpp -o $(TENSOR_MLP_BINARY)
