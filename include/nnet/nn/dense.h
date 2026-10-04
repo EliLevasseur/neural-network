@@ -1,8 +1,6 @@
 #ifndef DENSE_H
 #define DENSE_H
 
-#include "nnet/nn/parameter.h"
-#include "nnet/core/tensor_ops.h"
 #include "module.h"
 
 #include <cstddef>
@@ -11,10 +9,9 @@
 namespace nnet {
 
 	// One fully connected layer: every input connects to every output.
-	//
 	// It owns its weight and bias and nothing else. It does not apply an
 	// activation, and it does not keep any value from a previous call
-	class Dense : Unary_Module {
+	class Dense : public Unary_Module {
 		public:
 			Parameter weight;
 			Parameter bias;
@@ -25,30 +22,25 @@ namespace nnet {
 			: weight(createWeight(inputs, outputs)),
 			bias(createBias(outputs)) {}
 
-			// Non-owning pointers to this layer's trainable values. The layer
-			// keeps ownership; this just says where they live.
-			std::vector<Parameter*> parameters() override {
-				return {&weight, &bias};
-			}
+    
 
-			// Multiply by the weights, then add the bias. That is the whole
-			// layer.
+		protected:
+            Value forward_impl(const Value& input) const override {
+                // Each call gets its own leaves. A Dense used twice in one pass
+                // makes two pairs, both pointing at the same Parameter, so both
+                // contributions land in its gradient.
+                Value product = matmul(input, leafFor(weight));
+                return addBias(product, leafFor(bias));
+            }
 
-			Tensor forward(const Tensor& input) const {
-				Tensor output = input * weight.value;
-				addBias(output, bias.value);
-				return output;
-			}
+   			std::vector<NamedParameter> localNamedParameters() override {
+			return {
+				{"weight", &weight},
+				{"bias", &bias}
+			};
+		}
 
-			Tensor backward(const Tensor& layerInput, const Tensor& gradientFromAbove) {
-				// One weight is shared by every group in the input, so when the
-				// input has leading dimensions each group contributes its own gradient
-				weight.grad = sumLeadingDimensions(
-					matmulGradWeight(layerInput, gradientFromAbove),
-					weight.value.rank());
-				bias.grad = addBiasGrad(gradientFromAbove, bias.value);
-				return matmulGradInput(gradientFromAbove, weight.value);
-			}
+		
 	};
 }
 

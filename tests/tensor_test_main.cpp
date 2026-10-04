@@ -4,6 +4,8 @@ void runTensorTests(TestRunner& tests);
 void runDataFrameTests(TestRunner& tests);
 void runOperationTests(TestRunner& tests);
 void runDenseTests(TestRunner& tests);
+void runNamedParameterTests(TestRunner& tests);
+void runAutogradTests(TestRunner& tests);
 
 int main() {
     TestRunner tests;
@@ -12,6 +14,8 @@ int main() {
     runDataFrameTests(tests);
     runOperationTests(tests);
     runDenseTests(tests);
+    runNamedParameterTests(tests);
+    runAutogradTests(tests);
 
     return tests.finish();
 }

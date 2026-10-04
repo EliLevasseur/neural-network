@@ -1,312 +1,174 @@
-# nnet: a neural network framework built from scratch in C++
+# Deep Learning Framework
 
-This repository is a from-scratch C++ neural-network project with two goals: to
-make every calculation inside a neural network understandable and testable, and
-to grow a reusable framework whose contracts survive past one example model.
+A neural network framework I'm writing from scratch in C++, mainly to understand
+how every piece actually works: tensors, gradients, layers, training. No outside
+math or ML libraries.
 
-It contains **two systems that coexist on purpose**.
+The repo has two separate implementations on purpose.
 
-The **reference multilayer perceptron** is a working binary classifier written
-with nested `std::vector`. It is finished, verified, and deliberately frozen. Its
-job is to be a correctness oracle: an independently trusted source of numbers to
-check the new framework against.
+The first is a small multilayer perceptron written with nested `std::vector`. It
+was the first thing I got working, and it's now frozen. I use it as a reference:
+when the newer code produces a number, I check it against what this model
+produces for the same weights and input.
 
-The **tensor framework** is the reusable core being built beside it. It is not a
-rewrite of the reference model. It is a separate set of components: a `Tensor`,
-checked operations, `Parameter`, and `Dense`. They are proven correct by
-reproducing the reference model's numbers exactly.
+The second is the actual framework, built around a `Tensor` type. It has components
+(`Dense`, `Sigmoid`, `Sequential`), parameters tied to gradients, an SGD optimizer, and automatic
+differentiation, so a model can be trained without writing its backward pass by hand.
 
-## Current state
+## Where things stand
 
-Everything below is checked by `make test`, which builds three independent
-binaries and runs 157 assertions.
+The framework can train the same binary classifier the old model does, through
+autograd, and it gets the same result. Over a full 1000-epoch run on
+`data/complex_8d_test.csv`, the loss printed after every epoch matches the
+earlier hand-written backward pass exactly.
 
-| Suite | Checks | Covers |
-|---|---|---|
-| `make test-reference` | 36 | the legacy MLP: forward values, loss, analytic and numerical gradients, SGD |
-| `make test-tensor` | 83 | `Tensor`, its operations, `DataFrame` conversion, and `Dense` |
-| `make test-parity` | 38 | the framework reproducing the reference model's gradients and weight updates |
+`make test` builds three test programs that AI has helped me write to make sure I cover all test cases:
 
-All three pass warning-clean under `-Wall -Wextra -Wpedantic`, and identically
-under a checked-library build (`-D_GLIBCXX_DEBUG -D_GLIBCXX_ASSERTIONS`) and a
-release build (`-O2 -DNDEBUG`).
+```text
+make test-reference   36 checks   the old MLP on its own, no tensor code linked
+make test-tensor     150 checks   Tensor, operations, layers, and autograd
+make test-parity     104 checks   the framework compared against the old MLP
+```
 
-### What parity actually proves
+The parity tests compute gradients three ways (the old model, a manual backward
+pass built from plain tensor operations, and autograd) and require all three to
+agree to within a 1e-12 tolerence. They also cover a three-layer network and a layer that is
+used twice in the same graph.
 
-The parity suite builds the same model twice, once with the legacy `Network` and
-once from `Dense` layers, pins both to identical weights, and compares:
+Everything builds without warnings under `-Wall -Wextra -Wpedantic`, and all
+three suites pass under AddressSanitizer and UndefinedBehaviorSanitizer.
 
-- every weight gradient and every bias gradient, to a tolerance of `1e-12`;
-- every weight and bias after one stochastic gradient descent step;
-- the same again for a three-layer network, through a loop that does not know
-  how many layers there are.
+## Building
 
-The reference model's 1000-epoch loss trace also still hashes to the same value
-it did before any of this work started, so the oracle itself is untouched.
-
-**What it does not yet prove:** a full training run. Parity covers one sample,
-one forward pass, one backward pass, and one update. Multi-epoch training
-through the framework does not exist yet.
-
-## Building and running
-
-Requires a C++17 compiler and GNU Make. Built with GCC 16.
+You need a C++17 compiler and GNU Make. I build with GCC 16 on Fedora.
 
 ```bash
-make                 # build build/reference_mlp
-make run             # build and run the reference model
-make test            # run all three suites
-make test-reference  # legacy MLP only, links zero tensor code
-make test-tensor     # Tensor, operations, and Dense
-make test-parity     # framework against the oracle
-make tensor-mlp      # build and run the tensor-based example
-make graph           # plot the reference model's training loss (needs matplotlib)
+make                 # builds build/reference_mlp
+make run             # runs the old reference model
+make test            # all three test suites
+make tensor-mlp      # trains the tensor-based model
+make graph           # plots the reference model's training loss
 ```
 
-The reference model also emits machine-readable output:
+The Makefile builds with `-O0` for debugging, which makes training slow. For a
+optimized run, override the flags:
 
 ```bash
-./build/reference_mlp --loss-csv
+make -B tensor-mlp CXXFLAGS="-std=c++17 -O2 -Wall -Wextra -Wpedantic -Iinclude"
 ```
 
-`make test-reference` deliberately links no tensor source file at all, so work in
-progress on the framework cannot break the oracle.
+To run the tests under the sanitizers (on Fedora this needs the `libasan` and
+`libubsan` packages downloadable via dnf):
 
-## The tensor framework
-
-### Tensor
-
-An owning, contiguous, row-major tensor of `double`.
-
-```cpp
-nnet::Tensor matrix({2, 3}, {1, 2, 3, 4, 5, 6});
-
-matrix.rank();        // 2
-matrix.numel();       // 6
-matrix.shape();       // {2, 3}
-matrix.strides();     // {3, 1}
-matrix.at({1, 2});    // 6
+```bash
+make -B test CXXFLAGS="-std=c++17 -g3 -O0 -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Iinclude"
 ```
 
-Contracts it holds:
+## Training a model
 
-- `at()` requires exactly as many indices as the tensor has axes, and checks
-  every one against its own bound.
-- Construction rejects a shape whose element count does not match the data, and
-  throws `std::overflow_error` rather than wrapping around on an unrepresentable
-  shape.
-- Copy and move are explicit. Copies are independent.
-- `getData()` is const-only, so the storage cannot be resized from outside.
-- No views, no aliasing, no broadcasting. Rank zero and zero-sized dimensions
-  are rejected rather than supported.
-
-### Operations
-
-Free functions in `nnet/core/tensor_ops.h`, deliberately not methods, so that
-what owns state and what computes values stay separate.
-
-**Rank contract:** leading dimensions are batch dimensions and are left
-untouched. An operation acts on the last axis, or on the last two for anything
-matrix-shaped. Nothing broadcasts.
-
-| Forward | Gradient |
-|---|---|
-| `sigmoid` | `sigmoidDerivitive` |
-| `addBias` | `addBiasGrad` |
-| `operator*` (matrix multiply) | `matmulGradWeight`, `matmulGradInput` |
-| `binaryCrossEntropy` | `binaryCrossEntropyGrad` |
-
-Also `transpose`, `sum`, `sumLeadingDimensions`, `fill`, `zeros`, and the
-`Tensor` operators `+`, `-`, scalar `*`, and `inplaceMultiplication`.
-
-Every gradient above is checked against a central finite difference, not just
-against a hand-computed fixture.
-
-Matrix multiply takes either two operands of equal rank, pairing each matrix
-with its own, or a higher-rank left operand against a single rank-2 right
-operand that every group shares. The second form is what a layer applied across
-grouped data needs.
-
-### Parameter
-
-One trainable thing: a value and the gradient belonging to it, in one object so
-they cannot be mismatched.
+This is roughly what `examples/tensor_mlp.cpp` does:
 
 ```cpp
-nnet::Parameter weight(nnet::Tensor({2, 2}, {0.1, 0.4, -0.2, 0.3}));
-weight.value;   // the numbers
-weight.grad;    // same shape, zero-filled at birth
-```
+std::vector<std::unique_ptr<nnet::Unary_Module>> layers;
+layers.push_back(std::make_unique<nnet::Dense>(8, 6));
+layers.push_back(std::make_unique<nnet::Sigmoid>());
+layers.push_back(std::make_unique<nnet::Dense>(6, 1));
+layers.push_back(std::make_unique<nnet::Sigmoid>());
 
-Copying a `Parameter` is a compile error. An optimizer has to update the exact
-object the forward pass read, so a copy would be silently useless.
+nnet::Sequential model(std::move(layers));
+std::vector<nnet::Parameter*> parameters = model.parameters();
 
-### Dense
-
-One fully connected layer. Owns its weight and bias, applies no activation, and
-caches nothing.
-
-```cpp
-nnet::Dense layer(3, 2);                  // 3 inputs, 2 outputs
-
-nnet::Tensor output = layer.forward(input);
-nnet::Tensor inputGradient = layer.backward(savedInput, gradientFromAbove);
-
-for (nnet::Parameter* p : layer.parameters()) { /* weight, then bias */ }
-```
-
-`forward` is `const`, which is load-bearing rather than decorative: a const
-method cannot assign to a member, so the layer physically cannot stash values
-between calls. `backward` takes the forward pass's input back as an argument for
-the same reason.
-
-The activation lives outside the layer, chosen by the caller:
-
-```cpp
-nnet::Tensor activation = input;
-for (const nnet::Dense& layer : layers) {
-    activation = nnet::sigmoid(layer.forward(activation));
+for (/* each training row */) {
+    // clear models gradients
+    model.zeroGrad();
+    nnet::Value prediction = model.forward(nnet::makeLeaf(input));
+    nnet::backward(nnet::binaryCrossEntropy(prediction, nnet::makeLeaf(target)));
+    nnet::sgdOptimizer(parameters, learningRate);
 }
 ```
 
-## The reference model
-
-Still buildable, still the oracle. Weights are `weights[node][input]`, one
-`Layer` per entry, sigmoid throughout, binary cross-entropy, per-sample SGD.
+To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
 
 ```cpp
-DataFrame dataFrame("data/binary_test.csv", 3);
-const auto split = dataFrame.trainTestSplit(0.8, 42);
+{
+    nnet::NoGrad noGrad;
+    nnet::Value prediction = model.forward(nnet::makeLeaf(testData));
+}
+```
+
+## How it's put together
+
+**Tensor** (`include/nnet/core/tensor.h`) owns a contiguous, row-major block of
+`double` with a shape and strides. Indexing with `at()` is bounds-checked, and
+copies are always deep. There are no views and no broadcasting.
+
+**Operations** (`include/nnet/core/tensor_ops.h`) are free functions on Tensors:
+matrix multiply, bias add, sigmoid, binary cross-entropy, transpose, and a few
+more. Each differentiable one has a matching gradient function that's checked
+against finite differences. Leading dimensions are treated as batch dimensions,
+so the same operations work on a single row or a stack of matrices.
+
+**Autograd** (`include/nnet/core/autograd/`) wraps a Tensor in a `Value`. Every
+operation on Values leaves behind a small record of what it did and what it was
+given. `backward(loss)` walks those records from the loss back to the inputs and
+fills in each gradient. A graph can only be used for one backward pass, and
+calling it a second time throws rather than counting the gradients twice.
+
+**Layers** (`include/nnet/nn/`) are built on top of autograd. A `Parameter` holds
+a value and its gradient together. `Dense` owns a weight and a bias, `Sigmoid`
+has no parameters, and `Sequential` chains layers. Layers don't have backward
+methods at all; autograd handles that from the operations they use. When
+`backward` finishes, each layer's gradients end up in its Parameters, where the
+optimizer reads them.
+
+## The reference model
+
+The old model is still in `include/network.h`, `include/training.h`, and
+`examples/reference_mlp.cpp`. It uses sigmoid layers, binary cross-entropy, and
+per-sample SGD, with weights stored as `weights[node][input]`.
+
+```cpp
+DataFrame data("data/binary_test.csv", 3);
+const auto split = data.trainTestSplit(0.8, 42);
 
 Network network({3, 5, 3, 1});
 Trainer trainer(network, 0.09);
 trainer.fit(1000, split.XTrain, split.yTrain);
-
-const auto predictions = network.predict(split.XTest);
-const double accuracy = trainer.getAccuracy(predictions, split.yTest);
 ```
 
-Its verified behaviour covers only the repository's fixed test fixtures. It is
-not a safe general-purpose API: malformed files, ragged rows, and mismatched
-shapes are not all checked, and some checks are assertions that vanish in a
-release build.
+It's only been tested against the fixtures in this repo. It doesn't validate
+input files or shapes carefully, and some of its checks are `assert`s that
+disappear in a release build, so it isn't meant for general use.
 
-## Project structure
+## Platform notes
 
-```text
-neural-network/
-|-- data/                       small deterministic CSV fixtures
-|-- include/
-|   |-- dataframe.h             CSV loading and train/test split
-|   |-- network.h               legacy MLP
-|   |-- training.h              legacy trainer
-|   `-- nnet/
-|       |-- core/
-|       |   |-- tensor.h        the Tensor value type
-|       |   `-- tensor_ops.h    operations and their gradients
-|       `-- nn/
-|           |-- parameter.h     a value plus its gradient
-|           `-- dense.h         one fully connected layer
-|-- src/                        implementations, mirroring include/
-|-- examples/
-|   |-- reference_mlp.cpp       the legacy model, build/reference_mlp
-|   `-- tensor_mlp.cpp          Dense layers end to end, build/tensor_mlp
-|-- tests/                      three independent suites and their entry points
-|-- visualizations/graphing.py  training-loss plot
-`-- Makefile
-```
+So far this has only been built and tested on Linux and macOS. I plan to add a
+Visual Studio build for Windows. There are two things to know before that:
 
-## Platform support
+The Makefile assumes a Unix shell (`mkdir -p`, `./build/...`), so `make` won't
+run from `cmd.exe`.
 
-Developed and verified on Linux and macOS. Windows is not supported yet, and a
-Visual Studio build is planned.
+Weight initialization uses `rand() / RAND_MAX`. On Linux and macOS, `RAND_MAX`
+is 2147483647, but on MSVC it's only 32767, so on Windows every starting weight
+would come from about 32 thousand possible values instead of two billion, and
+the actual numbers would differ between platforms anyway. There's also no
+`srand()` call, so runs can't be seeded. Moving this to a seeded `std::mt19937`
+fixes both which will be implemented in the next commit.
+The train/test split in `DataFrame` already works that way.
 
-**The build assumes a POSIX shell.** Every target calls `mkdir -p` and runs its
-binary as `./build/name`, neither of which works in `cmd.exe`. That alone stops
-`make` from running natively on Windows, which is why a Visual Studio project is
-the route in rather than patching the Makefile.
+The loss graph (`make graph`) needs matplotlib and a desktop session. It works
+on macOS out of the box and on Linux with a display (WSLg under WSL).
 
-**Weight initialization is not portable.** Both weight generators call `rand()`
-and divide by `RAND_MAX`:
+## What's next
 
-```cpp
-weight = ((double)rand() / RAND_MAX) - 0.5;
-```
+- Seeded weight initialization, so training runs can be reproduced on purpose.
+- Mini-batches instead of one row at a time. Autograd currently builds a whole
+  graph per row, which is where most of the training time goes.
+- More activations and losses beyond sigmoid and binary cross-entropy.
+- Saving and loading trained models.
 
-`RAND_MAX` is implementation-defined. The standard only promises it is at least
-32767, and the real values differ sharply:
-
-| Toolchain | `RAND_MAX` | Distance between adjacent weights |
-|---|---|---|
-| glibc and macOS libc | 2147483647 | 0.00000000047 |
-| MSVC | 32767 | 0.0000305 |
-
-So on Windows every weight is drawn from a pool of 32768 values instead of two
-billion, roughly 65000 times coarser. Drawing 4096 weights from that pool
-produces around 240 exact duplicates, where on Linux duplicates are effectively
-impossible.
-
-The generators themselves also differ, so the same code produces entirely
-different starting weights on each platform. There is no `srand()` call anywhere
-either, meaning the sequence is fixed at the standard's default seed of 1 and
-cannot be chosen. Replacing this with a seeded `std::mt19937` and an explicit
-distribution fixes both problems at once, and is listed under the next steps
-below. `DataFrame::trainTestSplit` already does exactly that, so the data split
-is portable even though the weights are not.
-
-**The training-loss graph needs a desktop session.** `make graph` pipes the
-model's output into matplotlib, which needs the package installed and an
-interactive display:
-
-- macOS works with no setup beyond installing matplotlib.
-- Linux needs a display. Under WSL that means WSLg.
-- Windows has no target for it, since the pipeline is a shell pipe calling
-  `python3`, which on Windows is usually `python` or `py`.
-
-Nothing in `visualizations/graphing.py` is platform-specific. What varies is the
-environment around it.
-
-## Not built yet
-
-- A training loop through the framework. Forward, backward, and the update rule
-  all exist and are verified, but nothing runs them over epochs yet.
-- An optimizer as its own component. The update rule is three verified lines
-  inside the parity test.
-- Automatic differentiation. Every gradient is currently applied by hand.
-- A shared base class for layers. There is only one kind of layer, so there is
-  nothing to unify yet.
-- Seeded weight initialization. Weights come from the global random function,
-  which makes training runs impossible to reproduce deliberately.
-- Activations other than sigmoid, losses other than binary cross-entropy,
-  mini-batching, serialization, and any optimized or accelerated backend.
-
-## Where this is going
-
-**Immediately next, in order:**
-
-1. A training loop and an optimizer component. Forward, backward, and the update
-   rule all exist and are checked against the oracle. Nothing runs them over
-   epochs yet, so no model has actually been trained through the framework.
-2. Seeded weight initialization, so two runs can be compared deliberately rather
-   than by accident of the C library's default random sequence.
-3. Reverse-mode automatic differentiation. Applying four gradient rules by hand
-   is fine. Applying forty is where hand-rolled frameworks fall over, and it is
-   the thing that makes every later model affordable.
-
-**Long term goals:**
-
-- parameters, modules, losses, optimizers and training utilities as separate
-  components rather than one fused trainer;
-- deterministic data handling and metrics;
-- serialization, so a trained model can be saved and loaded;
-- embedding, convolution, normalization, attention, and recurrent building
-  blocks, each added when its prerequisites actually exist;
-- a readable CPU reference kernel kept alongside optimized ones, with optional
-  accelerator backends behind the same tested operation contracts;
-- reproducible testing, benchmarking, and documentation throughout.
-
-The target is a core that can carry at least two structurally different model
-families. Language, vision, game, and quantitative models should be able to
-share operations and components without being forced into one inheritance tree.
-Reproducing the binary classifier is a verification step along the way, not the
-ceiling.
+Longer term, I want this to be a core that can support quite different kinds of
+models (language, vision, games, quantitative work) sharing the same operations
+and layers, instead of being forced into one inheritance tree. Getting the old
+binary classifier to train through it was a checkpoint on the way there, not the
+goal.

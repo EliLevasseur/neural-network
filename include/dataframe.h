@@ -11,7 +11,7 @@
 #include <cassert>
 #include <stdexcept>
 
-#include "nnet/core/tensor.h"
+namespace nnet { class Tensor; }
 
 struct splitContainer {
      std::vector<std::vector<double>> XTest;

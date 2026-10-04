@@ -1,3 +1,4 @@
+#include "nnet/core/tensor.h"
 #include "dataframe.h"
 #include "test_utils.h"
 

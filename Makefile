@@ -9,18 +9,19 @@ REFERENCE_BINARY := build/reference_mlp
 
 NETWORK_SOURCES := src/network.cpp src/training.cpp
 DATAFRAME_SOURCE := src/dataframe.cpp
-TENSOR_SOURCES := src/core/tensor.cpp src/core/tensor_dataframe.cpp src/core/tensor_ops.cpp
+AUTOGRAD_SOURCES := src/autograd/operations.cpp src/autograd/backward.cpp
+TENSOR_SOURCES := src/core/tensor.cpp src/core/tensor_dataframe.cpp src/core/tensor_ops.cpp $(AUTOGRAD_SOURCES)
 
 REFERENCE_TEST_SOURCES := tests/reference_test_main.cpp tests/network_test.cpp tests/training_test.cpp
 REFERENCE_TEST_BINARY := build/reference_tests
 
-TENSOR_TEST_SOURCES := tests/tensor_test_main.cpp tests/tensor_test.cpp tests/dataframe_test.cpp tests/tensor_ops_tests.cpp tests/dense_test.cpp
+TENSOR_TEST_SOURCES := tests/tensor_test_main.cpp tests/tensor_test.cpp tests/dataframe_test.cpp tests/tensor_ops_tests.cpp tests/dense_test.cpp tests/autograd_test.cpp
 TENSOR_TEST_BINARY := build/tensor_tests
 
 # The parity binary is the one place the legacy oracle and the Tensor code
 # are deliberately linked together, so the new gradients can be compared
 # against numbers the reference model already proved. It needs no DataFrame.
-PARITY_TENSOR_SOURCES := src/core/tensor.cpp src/core/tensor_ops.cpp
+PARITY_TENSOR_SOURCES := src/core/tensor.cpp src/core/tensor_ops.cpp $(AUTOGRAD_SOURCES)
 PARITY_TEST_SOURCES := tests/parity_test_main.cpp tests/parity_test.cpp
 PARITY_TEST_BINARY := build/parity_tests
 
@@ -29,7 +30,7 @@ PARITY_TEST_BINARY := build/parity_tests
 TENSOR_MLP_SOURCE := examples/tensor_mlp.cpp
 TENSOR_MLP_BINARY := build/tensor_mlp
 
-HEADERS := $(wildcard include/*.h include/nnet/core/*.h include/nnet/nn/*.h include/optim/*.h)
+HEADERS := $(wildcard include/*.h include/nnet/core/*.h include/nnet/core/autograd/*.h include/nnet/nn/*.h include/optim/*.h)
 
 .PHONY: build run test test-reference test-tensor test-parity tensor-mlp graph
 

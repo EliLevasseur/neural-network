@@ -1,3 +1,4 @@
+#include "nnet/core/tensor.h"
 #include "../include/dataframe.h"
 
 nnet::Tensor DataFrame::flatten(std::vector<double> targets) const {
