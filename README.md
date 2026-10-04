@@ -17,10 +17,6 @@ differentiation, so a model can be trained without writing its backward pass by 
 
 ## Where things stand
 
-M3 (model composition and parity) and the scoped M4 autograd milestone are
-complete. The current phase is **M5: the general training stack**. Its first
-example-level increment, held-out evaluation for the Tensor MLP, is implemented.
-
 The Tensor example now uses the same seeded 80/20 split as the vector
 reference: it updates weights using training rows only, reports training loss
 each epoch, and evaluates test loss and accuracy once after training. The
