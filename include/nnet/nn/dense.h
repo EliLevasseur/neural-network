@@ -4,6 +4,7 @@
 #include "module.h"
 
 #include <cstddef>
+#include <random>
 #include <vector>
 
 namespace nnet {
@@ -17,9 +18,10 @@ namespace nnet {
 			Parameter bias;
 
 			// Both shapes come from the same two numbers, so the weight and the
-			// bias cannot end up sized for different layers.
-			Dense(std::size_t inputs, std::size_t outputs)
-			: weight(createWeight(inputs, outputs)),
+			// bias cannot end up sized for different layers. The generator is
+			// borrowed, so every layer in a model draws from one seeded sequence.
+			Dense(std::size_t inputs, std::size_t outputs, std::mt19937& generator)
+			: weight(createWeight(inputs, outputs, generator)),
 			bias(createBias(outputs)) {}
 
     

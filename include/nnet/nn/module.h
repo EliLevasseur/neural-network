@@ -128,6 +128,14 @@ namespace nnet {
            
     };
 
+	class ReLU : public Unary_Module {
+		protected:
+			Value forward_impl(const Value& input) const override {
+				return relu(input);
+			}
+		   
+	};
+
 }
 
 #endif

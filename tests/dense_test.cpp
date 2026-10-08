@@ -4,6 +4,7 @@
 #include "nnet/core/autograd/backward.h"
 
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -48,16 +49,31 @@ namespace {
 void runDenseTests(TestRunner& tests) {
 	tests.section("DENSE LAYER TESTS");
 
+	// These tests set their own weights or only check shapes, so any seed works.
+	std::mt19937 generator(1);
+
 	// ---- construction ---------------------------------------------------
 	// Both shapes come from the same two numbers, so a weight sized for one
 	// layer can never sit next to a bias sized for another.
-	nnet::Dense layer(3, 2);
+	nnet::Dense layer(3, 2, generator);
 
 	tests.expectTrue(layer.weight.value.shape() == nnet::Tensor::Shape{3, 2},
 		"Dense(3, 2) creates a weight shaped inputs by outputs");
 
 	tests.expectTrue(layer.bias.value.shape() == nnet::Tensor::Shape{2},
 		"Dense(3, 2) creates one bias value per output");
+
+	{
+		// The generator is shared by reference, so the second layer continues
+		// where the first left off instead of repeating its numbers.
+		std::mt19937 sharedGenerator(11);
+		nnet::Dense firstLayer(4, 3, sharedGenerator);
+		nnet::Dense secondLayer(4, 3, sharedGenerator);
+		tests.expectTrue(firstLayer.weight.value.getData() != secondLayer.weight.value.getData(),
+			"two Dense layers sharing one generator start with different weights");
+		tests.expectTrue(firstLayer.bias.value.getData() == std::vector<double>{0.0, 0.0, 0.0},
+			"Dense starts its bias at zero");
+	}
 
 	// A gradient is born matching the value it belongs to, and starts at
 	// zero so it can be read before anything has written to it.
@@ -88,7 +104,7 @@ void runDenseTests(TestRunner& tests) {
 	// Force the owning vector to reallocate after parameter discovery.
 	// The pointers move, but the Dense and its Parameters must stay put.
 	std::vector<std::unique_ptr<nnet::Dense>> ownedLayers;
-	ownedLayers.push_back(std::make_unique<nnet::Dense>(2, 2));
+	ownedLayers.push_back(std::make_unique<nnet::Dense>(2, 2, generator));
 	nnet::Dense* originalDense = ownedLayers.front().get();
 	const auto stableParameters = ownedLayers.front()->parameters();
 	ownedLayers.reserve(ownedLayers.capacity() + 1);
@@ -107,7 +123,7 @@ void runDenseTests(TestRunner& tests) {
 	// ---- forward --------------------------------------------------------
 	// Weights are randomly initialised, so overwrite them with known values
 	// to get a result that can be checked by hand.
-	nnet::Dense knownLayer(2, 2);
+	nnet::Dense knownLayer(2, 2, generator);
 	knownLayer.weight.value = nnet::Tensor({2, 2}, {1, 2,
 	                                                3, 4});
 	knownLayer.bias.value = nnet::Tensor({2}, {10, 20});
@@ -143,7 +159,7 @@ void runDenseTests(TestRunner& tests) {
 		"forward leaves the layer's own weight and bias untouched");
 	// ---- a layer applied across grouped (rank-3) data -------------------
 	// 2 groups, 2 rows each, 3 numbers per row, through one Dense(3, 2).
-	nnet::Dense groupedLayer(3, 2);
+	nnet::Dense groupedLayer(3, 2, generator);
 	groupedLayer.weight.value = nnet::Tensor({3, 2}, {1, 0,
 	                                                  0, 1,
 	                                                  1, 1});
@@ -183,7 +199,7 @@ void runDenseTests(TestRunner& tests) {
 	// ---- gradient accumulation and clearing -----------------------------
 	// For input 2 and incoming gradient 3: dW = 2 * 3 = 6, db = 3.
 	// With weight 0.5, each call returns dInput = 3 * 0.5 = 1.5.
-	nnet::Dense accumulatingLayer(1, 1);
+	nnet::Dense accumulatingLayer(1, 1, generator);
 	accumulatingLayer.weight.value = nnet::Tensor({1, 1}, {0.5});
 	accumulatingLayer.bias.value = nnet::Tensor({1}, {0.25});
 	const nnet::Tensor accumulationInput({1, 1}, {2.0});
@@ -243,7 +259,7 @@ void runDenseTests(TestRunner& tests) {
         catch (const std::invalid_argument&) { rejected = true; }
         tests.expectTrue(rejected, name);
     };
-    nnet::Dense fixed(1, 1);
+    nnet::Dense fixed(1, 1, generator);
     fixed.weight.value = nnet::Tensor({2, 1}, {0.5, 0.5});
     fixed.weight.grad = nnet::Tensor({2, 1}, {0.0, 0.0});
     expectShapeRejected([&] { (void)forwardOf(fixed, nnet::Tensor({1, 2}, {1.0, 2.0})); },
@@ -272,7 +288,7 @@ void runDenseTests(TestRunner& tests) {
         1.0, 1.0e-12, "public forward dispatches through the protected implementation hook");
 
     // ---- Dense under autograd ------------------------------------------------
-    nnet::Dense observed(1, 1);
+    nnet::Dense observed(1, 1, generator);
     observed.weight.value = nnet::Tensor({1, 1}, {0.5});
     observed.bias.value = nnet::Tensor({1}, {0.25});
     const nnet::Tensor one({1, 1}, {2.0});
@@ -323,8 +339,9 @@ protected:
 void runNamedParameterTests(TestRunner& tests) {
     tests.section("NAMED PARAMETER DISCOVERY");
 
-    auto first = std::make_unique<nnet::Dense>(2, 2);
-    auto last = std::make_unique<nnet::Dense>(2, 1);
+    std::mt19937 generator(1);
+    auto first = std::make_unique<nnet::Dense>(2, 2, generator);
+    auto last = std::make_unique<nnet::Dense>(2, 1, generator);
     const std::vector<nnet::Parameter*> expectedPointers = {
         &first->weight, &first->bias, &last->weight, &last->bias
     };
@@ -338,6 +355,12 @@ void runNamedParameterTests(TestRunner& tests) {
     tests.expectTrue(activation.namedParameters().empty() &&
         activation.parameters().empty(),
         "Sigmoid discovers no parameters");
+
+    nnet::ReLU reluActivation;
+    tests.expectTrue(reluActivation.parameters().empty() &&
+        reluActivation.forward(nnet::makeLeaf(nnet::Tensor({1, 3}, {-1.0, 0.0, 2.5})))->data.getData() ==
+            std::vector<double>{0.0, 0.0, 2.5},
+        "ReLU module has no parameters and applies relu");
 
     std::vector<std::unique_ptr<nnet::Unary_Module>> components;
     components.push_back(std::move(first));

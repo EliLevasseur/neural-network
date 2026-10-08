@@ -1,6 +1,7 @@
 #include "nnet/core/tensor_ops.h"
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <utility>
 
 namespace nnet {
@@ -31,6 +32,43 @@ namespace nnet {
 		return Tensor(tensor.shape(), out);
 	}
 
+	Tensor relu(const Tensor& tensor) {
+		const auto& input_data = tensor.getData();
+		std::vector<double> out(input_data.size());
+		for (size_t i = 0; i < input_data.size(); ++i) {
+			out[i] = std::max(0.0, input_data[i]);
+		}
+		return Tensor(tensor.shape(), out);
+	}
+
+	Tensor softmax(const Tensor& scores) {
+		const std::vector<double>& scoreData = scores.getData();
+		// Each row is one image's scores. Every row gets its own largest score
+		// and its own total, so images in the same batch never mix.
+		const std::size_t width = scores.shape().back();
+		const std::size_t rows = scores.numel() / width;
+		std::vector<double> probabilities(scoreData.size());
+
+		for (std::size_t row = 0; row < rows; row++) {
+			const std::size_t rowStart = row * width;
+			const auto rowBegin = scoreData.begin() + rowStart;
+			// Subtracting the row's largest score first means the biggest
+			// value passed to exp is 0, so nothing can overflow. It does not
+			// change the result, because it scales the top and the bottom of
+			// every fraction by the same amount.
+			const double maxScore = *std::max_element(rowBegin, rowBegin + width);
+			for (std::size_t col = 0; col < width; col++) {
+				probabilities[rowStart + col] = std::exp(scoreData[rowStart + col] - maxScore);
+			}
+			const double rowTotal = std::accumulate(probabilities.begin() + rowStart,
+				probabilities.begin() + rowStart + width, 0.0);
+			for (std::size_t col = 0; col < width; col++) {
+				probabilities[rowStart + col] /= rowTotal;
+			}
+		}
+		return Tensor(scores.shape(), std::move(probabilities));
+	}
+
 	// Internal Use Helpers
 
 	Tensor sigmoidDerivitive(const Tensor& tensor) {
@@ -39,6 +77,17 @@ namespace nnet {
 		std::vector<double> grad(activatedData.size());
 		for (std::size_t i = 0; i < activatedData.size(); i++) {
 			grad[i] = activatedData[i] * (1 - activatedData[i]);
+		}
+		return Tensor(tensor.shape(), grad);
+	}
+
+	// Slope is 1 for positive inputs and 0 otherwise. At exactly zero there is
+	// no single answer; 0 is the common choice, and PyTorch uses it too.
+	Tensor reluDerivitive(const Tensor& tensor) {
+		const auto& input_data = tensor.getData();
+		std::vector<double> grad(input_data.size());
+		for (std::size_t i = 0; i < input_data.size(); i++) {
+			grad[i] = input_data[i] > 0 ? 1.0 : 0.0;
 		}
 		return Tensor(tensor.shape(), grad);
 	}
@@ -179,6 +228,19 @@ namespace nnet {
 		return upstreamGrad * transpose(weight);
 	}
 
+	Tensor softMax(const Tensor& scores) {
+		double maxScore = *std::max_element(scores.getData().begin(), scores.getData().end());
+		std::vector<double> probabilities(scores.getData().size());
+		for (std::size_t i = 0; i < scores.getData().size(); i++) {
+			probabilities[i] = std::exp(scores.getData()[i] - maxScore);
+		}
+		double sum = std::accumulate(probabilities.begin(), probabilities.end(), 0.0);
+		for (std::size_t i = 0; i < probabilities.size(); i++) {
+			probabilities[i] /= sum;
+		}
+		return Tensor(scores.shape(), std::move(probabilities));
+	}
+
 	double binaryCrossEntropy(const Tensor& predictions, const Tensor& targets) {
 		if (predictions.shape() != targets.shape()) {
 			throw std::invalid_argument("Predictions and targets must have the same shape");
@@ -211,26 +273,84 @@ namespace nnet {
 		return Tensor(predictions.shape(), grad);
 	}
 
+	// MULTI-CLASS PREDICTION FEATURES
+
+	namespace {
+		// Both functions below rely on targets shaped like the scores, and on
+		// every target row adding up to 1. The gradient formula needs the
+		// second, and a broken one-hot row (all zeros, say) would otherwise
+		// train silently on a loss of zero.
+		void checkSoftmaxCrossEntropyInputs(const Tensor& scores, const Tensor& targets) {
+			if (scores.shape() != targets.shape()) {
+				throw std::invalid_argument("Scores and targets must have the same shape");
+			}
+			const std::vector<double>& targetData = targets.getData();
+			const std::size_t width = targets.shape().back();
+			for (std::size_t rowStart = 0; rowStart < targetData.size(); rowStart += width) {
+				const double rowTotal = std::accumulate(targetData.begin() + rowStart,
+					targetData.begin() + rowStart + width, 0.0);
+				if (std::abs(rowTotal - 1.0) > 1.0e-9) {
+					throw std::invalid_argument("Each target row must add up to 1");
+				}
+			}
+		}
+	}
+
+	double softmaxCrossEntropy(const Tensor& scores, const Tensor& targets) {
+		checkSoftmaxCrossEntropyInputs(scores, targets);
+		const std::vector<double>& scoreData = scores.getData();
+		const std::vector<double>& targetData = targets.getData();
+		const std::size_t width = scores.shape().back();
+		const std::size_t rows = scores.numel() / width;
+
+		double totalLoss = 0.0;
+		for (std::size_t row = 0; row < rows; row++) {
+			const std::size_t rowStart = row * width;
+			const auto rowBegin = scoreData.begin() + rowStart;
+			const double maxScore = *std::max_element(rowBegin, rowBegin + width);
+			double rowTotal = 0.0;
+			for (std::size_t col = 0; col < width; col++) {
+				rowTotal += std::exp(scoreData[rowStart + col] - maxScore);
+			}
+			// The log of each probability, worked out without ever forming the
+			// probability itself. A probability too small for a double would
+			// round to 0, and log(0) is minus infinity; this stays finite.
+			const double logRowTotal = std::log(rowTotal);
+			for (std::size_t col = 0; col < width; col++) {
+				const double logProbability = scoreData[rowStart + col] - maxScore - logRowTotal;
+				totalLoss -= targetData[rowStart + col] * logProbability;
+			}
+		}
+		return totalLoss / static_cast<double>(rows);
+	}
+
+	// Softmax and the loss together have a simple gradient: probabilities
+	// minus targets. The loss averages over rows, so each row's share is
+	// divided by the row count.
+	Tensor softmaxCrossEntropyGrad(const Tensor& scores, const Tensor& targets) {
+		checkSoftmaxCrossEntropyInputs(scores, targets);
+		const std::size_t rows = scores.numel() / scores.shape().back();
+		return (softmax(scores) - targets) * (1.0 / static_cast<double>(rows));
+	}
+
 
 	Tensor createBias(std::size_t layerCount) {
 		return zeros(Tensor::Shape({layerCount}));
 	}
 
-	Tensor createWeight(const size_t numInputs, const size_t numOutputs) {
+	// He initialization: every weight is drawn evenly from -limit to +limit,
+	Tensor createWeight(const size_t numInputs, const size_t numOutputs, std::mt19937& generator) {
+		// Checked before the limit is computed, which would divide by zero.
+		if (numInputs == 0 || numOutputs == 0) {
+			throw std::invalid_argument("createWeight needs at least one input and one output");
+		}
+		const double limit = std::sqrt(6.0 / static_cast<double>(numInputs));
+		std::uniform_real_distribution<double> distribution(-limit, limit);
 		std::vector<double> weightData(numInputs * numOutputs);
 		for (size_t i = 0; i < weightData.size(); ++i) {
-			weightData[i] = ((double)rand() / RAND_MAX) - 0.5; // Random values between -0.5 and 0.5
+			weightData[i] = distribution(generator);
 		}
 		return Tensor({numInputs, numOutputs}, weightData);
-	}
-
-	std::vector<Tensor> createWeights(std::vector<size_t> layerSizes) {
-		std::vector<Tensor> vectorOfWeightTensors;
-		vectorOfWeightTensors.reserve(layerSizes.size() - 1);
-		for (size_t i = 0; i + 1 < layerSizes.size(); i++) {
-			vectorOfWeightTensors.push_back(createWeight(layerSizes[i], layerSizes[i + 1]));
-		}
-		return vectorOfWeightTensors;
 	}
 
 	

@@ -3,6 +3,8 @@
 #include "optim/sgd.h"
 #include "nnet/core/autograd/backward.h"
 
+#include <random>
+
 // Standalone integration test; links the real optimizer, not an inline copy.
 // Build from the repository root:
 // g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude -Itests tests/optimizer_test.cpp src/core/tensor.cpp src/core/tensor_ops.cpp src/optim/sgd.cpp src/autograd/operations.cpp src/autograd/backward.cpp -o build/optimizer_tests
@@ -23,7 +25,8 @@ int main() {
     TestRunner tests;
     tests.section("FROZEN PARAMETERS / DENSE / SGD");
 
-    nnet::Dense layer(1, 1);
+    std::mt19937 generator(1);
+    nnet::Dense layer(1, 1, generator);
     layer.weight.value = nnet::Tensor({1, 1}, {0.5});
     layer.bias.value = nnet::Tensor({1}, {0.25});
     const nnet::Tensor input({1, 1}, {2.0});

@@ -12,6 +12,12 @@ namespace nnet {
         inputs[0]->grad = inputs[0]->grad + contribution;
     }
 
+    void ReLURecord::sendGradBackward(const Tensor& gradientOfOutput) {
+        Tensor contribution = gradientOfOutput;
+        contribution.inplaceMultiplication(reluDerivitive(inputs[0]->data));
+        inputs[0]->grad = inputs[0]->grad + contribution;
+    }
+
     void matmulRecord::sendGradBackward(const Tensor& gradientOfOutput) {
         // one gradient for each input
         inputs[0]->grad = inputs[0]->grad + matmulGradInput(gradientOfOutput, inputs[1]->data);
@@ -39,6 +45,13 @@ namespace nnet {
         inputs[0]->grad = inputs[0]->grad + contribution;
     }
 
+    // Same shape as LossRecord: only the scores get a gradient.
+    void SoftmaxCrossEntropyRecord::sendGradBackward(const Tensor& gradientOfOutput) {
+        Tensor contribution = softmaxCrossEntropyGrad(inputs[0]->data, inputs[1]->data);
+        contribution = contribution * gradientOfOutput.at({0});
+        inputs[0]->grad = inputs[0]->grad + contribution;
+    }
+
     // ---- forward halves ----------------------------------------------------
     // Each one computes its output with the plain Tensor operation, and leaves
     // a record behind for backward. makeOutput drops the record under NoGrad.
@@ -47,6 +60,12 @@ namespace nnet {
         auto record = std::make_shared<SigmoidRecord>();
         record->inputs = {input};
         return makeOutput(sigmoid(input->data), record);
+    }
+
+    Value relu(const Value& input) {
+        auto record = std::make_shared<ReLURecord>();
+        record->inputs = {input};
+        return makeOutput(relu(input->data), record);
     }
 
     Value add(const Value& left, const Value& right) {
@@ -78,6 +97,15 @@ namespace nnet {
 
         // A single number, carried as shape {1}.
         const double loss = binaryCrossEntropy(prediction->data, target->data);
+        return makeOutput(Tensor({1}, {loss}), record);
+    }
+
+    Value softmaxCrossEntropy(const Value& scores, const Value& target) {
+        auto record = std::make_shared<SoftmaxCrossEntropyRecord>();
+        record->inputs = {scores, target};
+
+        // A single number, carried as shape {1}.
+        const double loss = softmaxCrossEntropy(scores->data, target->data);
         return makeOutput(Tensor({1}, {loss}), record);
     }
 }

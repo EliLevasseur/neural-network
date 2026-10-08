@@ -2,6 +2,11 @@
 #include "test_utils.h"
 #include "nnet/core/tensor.h"
 
+#include <algorithm>
+#include <cmath>
+#include <random>
+#include <stdexcept>
+
 void runOperationTests(TestRunner& tests) {
 	tests.section("TENSOR OPERATION TESTS");
 
@@ -50,6 +55,149 @@ void runOperationTests(TestRunner& tests) {
 	const nnet::Tensor sigInput({1}, {0.5});
 	tests.expectNear(sigNumeric, nnet::sigmoidDerivitive(sigInput).at({0}), 1.0e-6,
 		"sigmoidGrad matches a central finite difference");
+
+	const nnet::Tensor reluInput({4}, {-2.0, -0.5, 0.3, 1.7});
+	tests.expectTrue(nnet::relu(reluInput).getData() == std::vector<double>{0.0, 0.0, 0.3, 1.7},
+		"relu keeps positive values and replaces negative values with zero");
+	tests.expectTrue(nnet::reluDerivitive(nnet::Tensor({1}, {0.0})).at({0}) == 0.0,
+		"reluDerivitive is zero at exactly zero");
+
+	// A finite difference straddling zero would measure 0.5, which matches
+	// neither side, so these points stay clear of it.
+	const nnet::Tensor reluPoints({4}, {-1.5, -0.3, 0.4, 2.0});
+	const nnet::Tensor reluSlopes = nnet::reluDerivitive(reluPoints);
+	bool reluSlopesMatch = true;
+	for (std::size_t i = 0; i < reluPoints.numel(); ++i) {
+		const double point = reluPoints.at({i});
+		const double numeric =
+			(nnet::relu(nnet::Tensor({1}, {point + h})).at({0}) - nnet::relu(nnet::Tensor({1}, {point - h})).at({0})) / (2 * h);
+		if (std::abs(numeric - reluSlopes.at({i})) > 1.0e-6) {
+			reluSlopesMatch = false;
+		}
+	}
+	tests.expectTrue(reluSlopesMatch, "reluDerivitive matches a central finite difference away from zero");
+
+	// Weight initialization: every weight is drawn evenly from -limit to
+	// +limit, where limit = sqrt(6 / inputs).
+	{
+		std::mt19937 firstGenerator(7);
+		std::mt19937 secondGenerator(7);
+		const nnet::Tensor firstWeights = nnet::createWeight(784, 128, firstGenerator);
+		const nnet::Tensor secondWeights = nnet::createWeight(784, 128, secondGenerator);
+		tests.expectTrue(firstWeights.shape() == nnet::Tensor::Shape{784, 128},
+			"createWeight makes an inputs by outputs weight");
+		tests.expectTrue(firstWeights.getData() == secondWeights.getData(),
+			"createWeight gives identical weights from identical seeds");
+
+		std::mt19937 otherSeed(8);
+		tests.expectTrue(nnet::createWeight(784, 128, otherSeed).getData() != firstWeights.getData(),
+			"createWeight gives different weights from a different seed");
+		tests.expectTrue(nnet::createWeight(784, 128, firstGenerator).getData() != firstWeights.getData(),
+			"the next draw from the same generator gives different weights");
+
+		const double limit = std::sqrt(6.0 / 784.0);
+		const auto [smallest, largest] =
+			std::minmax_element(firstWeights.getData().begin(), firstWeights.getData().end());
+		tests.expectTrue(*smallest >= -limit && *largest <= limit,
+			"every weight stays inside plus or minus sqrt(6 / inputs)");
+		// 100352 draws land very close to both ends of the range. This catches
+		// a range that is too narrow, or one that only covers one side of zero.
+		tests.expectTrue(*smallest < -0.99 * limit && *largest > 0.99 * limit,
+			"weights fill the whole range on both sides of zero");
+
+		bool rejectedNoInputs = false;
+		try {
+			nnet::createWeight(0, 3, firstGenerator);
+		} catch (const std::invalid_argument&) {
+			rejectedNoInputs = true;
+		}
+		tests.expectTrue(rejectedNoInputs, "createWeight rejects a layer with no inputs");
+	}
+
+	// Softmax and multi-class cross-entropy. The expected values are worked
+	// out here straight from the definition, without the largest-score shift.
+	{
+		const nnet::Tensor scores({2, 3}, {2.0, 1.0, 0.1, 0.5, 0.5, 3.0});
+		const nnet::Tensor targets({2, 3}, {1.0, 0.0, 0.0, 0.0, 0.0, 1.0});
+
+		const nnet::Tensor probabilities = nnet::softmax(scores);
+		bool softmaxMatches = true;
+		for (std::size_t row = 0; row < 2; ++row) {
+			double rowTotal = 0.0;
+			for (std::size_t col = 0; col < 3; ++col) {
+				rowTotal += std::exp(scores.at({row, col}));
+			}
+			for (std::size_t col = 0; col < 3; ++col) {
+				const double expected = std::exp(scores.at({row, col})) / rowTotal;
+				if (!(std::abs(probabilities.at({row, col}) - expected) <= tolerance)) {
+					softmaxMatches = false;
+				}
+			}
+		}
+		tests.expectTrue(softmaxMatches, "softmax matches the definition separately on every row of a batch");
+
+		// e^1000 overflows a double, so without the shift these would be NaN.
+		const nnet::Tensor hugeProbabilities = nnet::softmax(nnet::Tensor({1, 3}, {1000.0, 999.0, 998.0}));
+		const nnet::Tensor smallProbabilities = nnet::softmax(nnet::Tensor({1, 3}, {2.0, 1.0, 0.0}));
+		bool hugeMatches = true;
+		for (std::size_t col = 0; col < 3; ++col) {
+			if (!(std::abs(hugeProbabilities.at({0, col}) - smallProbabilities.at({0, col})) <= tolerance)) {
+				hugeMatches = false;
+			}
+		}
+		tests.expectTrue(hugeMatches, "softmax of scores near 1000 matches the same scores shifted down");
+
+		const double expectedLoss =
+			-(std::log(std::exp(2.0) / (std::exp(2.0) + std::exp(1.0) + std::exp(0.1))) +
+			  std::log(std::exp(3.0) / (std::exp(0.5) + std::exp(0.5) + std::exp(3.0)))) / 2.0;
+		tests.expectNear(nnet::softmaxCrossEntropy(scores, targets), expectedLoss, tolerance,
+			"softmaxCrossEntropy averages minus the log of the correct probability over rows");
+
+		// The correct class gets a probability of about e^-1000, which rounds
+		// to 0 in a double, and log(0) is minus infinity. Working in logs
+		// gives the true loss, 1000, and a finite gradient.
+		const nnet::Tensor confidentAndWrong({1, 2}, {1000.0, 0.0});
+		const nnet::Tensor secondIsCorrect({1, 2}, {0.0, 1.0});
+		tests.expectNear(nnet::softmaxCrossEntropy(confidentAndWrong, secondIsCorrect), 1000.0, 1.0e-9,
+			"softmaxCrossEntropy stays finite when the correct class has a vanishing probability");
+		const nnet::Tensor wrongGradient = nnet::softmaxCrossEntropyGrad(confidentAndWrong, secondIsCorrect);
+		tests.expectNear(wrongGradient.at({0, 0}), 1.0, tolerance,
+			"the confidently wrong score is pushed down at full strength");
+		tests.expectNear(wrongGradient.at({0, 1}), -1.0, tolerance,
+			"the neglected correct score is pushed up at full strength");
+
+		const nnet::Tensor analyticGradient = nnet::softmaxCrossEntropyGrad(scores, targets);
+		bool gradientMatches = true;
+		for (std::size_t i = 0; i < scores.numel(); ++i) {
+			std::vector<double> plusData = scores.getData();
+			std::vector<double> minusData = scores.getData();
+			plusData[i] += h;
+			minusData[i] -= h;
+			const double numeric =
+				(nnet::softmaxCrossEntropy(nnet::Tensor({2, 3}, plusData), targets) -
+				 nnet::softmaxCrossEntropy(nnet::Tensor({2, 3}, minusData), targets)) / (2 * h);
+			if (!(std::abs(numeric - analyticGradient.getData()[i]) <= 1.0e-6)) {
+				gradientMatches = false;
+			}
+		}
+		tests.expectTrue(gradientMatches, "softmaxCrossEntropyGrad matches a central finite difference");
+
+		bool rejectedShape = false;
+		try {
+			nnet::softmaxCrossEntropy(scores, nnet::Tensor({3, 2}, {1.0, 0.0, 0.0, 1.0, 1.0, 0.0}));
+		} catch (const std::invalid_argument&) {
+			rejectedShape = true;
+		}
+		tests.expectTrue(rejectedShape, "softmaxCrossEntropy rejects targets shaped differently from the scores");
+
+		bool rejectedRow = false;
+		try {
+			nnet::softmaxCrossEntropy(scores, nnet::Tensor({2, 3}, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0}));
+		} catch (const std::invalid_argument&) {
+			rejectedRow = true;
+		}
+		tests.expectTrue(rejectedRow, "softmaxCrossEntropy rejects a target row that does not add up to 1");
+	}
 
 	const nnet::Tensor matrixForBiasGrad({2, 2}, {1, 2, 3, 4});
 	const nnet::Tensor upstreamOnes({2, 2}, {1, 1, 1, 1});

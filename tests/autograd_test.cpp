@@ -38,7 +38,9 @@ namespace {
                 (forward(nnet::Tensor(leaf->data.shape(), plusData)) -
                  forward(nnet::Tensor(leaf->data.shape(), minusData))) / (2.0 * step);
             const double analytic = leaf->grad.getData()[i];
-            if (std::abs(numeric - analytic) > 1.0e-7) {
+            // Written this way round so a NaN counts as a mismatch: every
+            // comparison with NaN is false, so `NaN > 1.0e-7` would pass.
+            if (!(std::abs(numeric - analytic) <= 1.0e-7)) {
                 allMatch = false;
             }
         }
@@ -63,6 +65,23 @@ void runAutogradTests(TestRunner& tests) {
         expectGradientMatches(tests, x,
             [](const nnet::Tensor& t) { return sumOf(nnet::sigmoid(nnet::sigmoid(t))); },
             "backward walks more than one operation deep");
+    }
+    {
+        nnet::Value x = nnet::makeLeaf(nnet::Tensor({4}, {-1.5, -0.3, 0.4, 2.0}));
+        nnet::backward(nnet::relu(x));
+        expectGradientMatches(tests, x,
+            [](const nnet::Tensor& t) { return sumOf(nnet::relu(t)); },
+            "relu gradient matches a finite difference");
+    }
+    {
+        // backward seeds the last output with ones, so a record that ignored
+        // its incoming gradient would still pass the check above. A sigmoid
+        // after relu makes the incoming gradient something other than one.
+        nnet::Value x = nnet::makeLeaf(nnet::Tensor({4}, {-1.5, -0.3, 0.4, 2.0}));
+        nnet::backward(nnet::sigmoid(nnet::relu(x)));
+        expectGradientMatches(tests, x,
+            [](const nnet::Tensor& t) { return sumOf(nnet::sigmoid(nnet::relu(t))); },
+            "relu passes back the gradient it receives, not just its slope");
     }
 
     // ---- step 2: matmul, bias add, loss ----------------------------------
@@ -134,6 +153,74 @@ void runAutogradTests(TestRunner& tests) {
             "a full layer's weight gradient matches a finite difference");
         expectGradientMatches(tests, biasLeaf, lossWithBias,
             "a full layer's bias gradient matches a finite difference");
+    }
+
+    // ---- softmax cross-entropy: the multi-class loss ----------------------
+    {
+        const nnet::Tensor target({2, 3}, {1, 0, 0, 0, 0, 1});
+        nnet::Value scores = nnet::makeLeaf(nnet::Tensor({2, 3}, {2.0, 1.0, 0.1, 0.5, 0.5, 3.0}));
+        nnet::backward(nnet::softmaxCrossEntropy(scores, nnet::makeLeaf(target)));
+        expectGradientMatches(tests, scores,
+            [&](const nnet::Tensor& t) { return nnet::softmaxCrossEntropy(t, target); },
+            "softmax cross-entropy gradient matches a finite difference");
+    }
+    {
+        // Starting backward from 2.5 instead of 1 must scale every gradient
+        // by 2.5, which only happens if the record uses what it receives.
+        const nnet::Tensor target({2, 3}, {1, 0, 0, 0, 0, 1});
+        nnet::Value scores = nnet::makeLeaf(nnet::Tensor({2, 3}, {2.0, 1.0, 0.1, 0.5, 0.5, 3.0}));
+        nnet::backward(nnet::softmaxCrossEntropy(scores, nnet::makeLeaf(target)), nnet::Tensor({1}, {2.5}));
+        expectGradientMatches(tests, scores,
+            [&](const nnet::Tensor& t) { return 2.5 * nnet::softmaxCrossEntropy(t, target); },
+            "softmax cross-entropy passes back the gradient it receives");
+    }
+
+    // ---- the MNIST network in miniature: Dense, ReLU, Dense, loss ---------
+    // Two examples, three inputs, four hidden units, three classes. Every
+    // hidden pre-activation is at least 0.12 away from zero, where ReLU bends.
+    {
+        const nnet::Tensor input({2, 3}, {0.6, -0.4, 0.9, -0.2, 0.7, 0.1});
+        const nnet::Tensor hiddenWeight({3, 4}, {0.5, -0.3, 0.2, -0.6,
+                                                 -0.4, 0.8, 0.1, 0.3,
+                                                 0.2, 0.1, -0.7, 0.4});
+        const nnet::Tensor hiddenBias({4}, {0.05, -0.1, 0.2, 0.0});
+        const nnet::Tensor outputWeight({4, 3}, {0.3, -0.2, 0.5,
+                                                 -0.1, 0.4, 0.2,
+                                                 0.6, -0.5, 0.1,
+                                                 -0.3, 0.2, -0.4});
+        const nnet::Tensor outputBias({3}, {0.1, -0.05, 0.0});
+        const nnet::Tensor target({2, 3}, {0, 1, 0, 0, 0, 1});
+
+        nnet::Value hiddenWeightLeaf = nnet::makeLeaf(hiddenWeight);
+        nnet::Value hiddenBiasLeaf = nnet::makeLeaf(hiddenBias);
+        nnet::Value outputWeightLeaf = nnet::makeLeaf(outputWeight);
+        nnet::Value outputBiasLeaf = nnet::makeLeaf(outputBias);
+        const nnet::Value hiddenActivation = nnet::relu(nnet::addBias(
+            nnet::matmul(nnet::makeLeaf(input), hiddenWeightLeaf), hiddenBiasLeaf));
+        const nnet::Value scores = nnet::addBias(
+            nnet::matmul(hiddenActivation, outputWeightLeaf), outputBiasLeaf);
+        nnet::backward(nnet::softmaxCrossEntropy(scores, nnet::makeLeaf(target)));
+
+        auto lossFrom = [&](const nnet::Tensor& firstWeight, const nnet::Tensor& firstBias,
+                            const nnet::Tensor& secondWeight, const nnet::Tensor& secondBias) {
+            nnet::Tensor hiddenPreActivation = input * firstWeight;
+            nnet::addBias(hiddenPreActivation, firstBias);
+            nnet::Tensor outputScores = nnet::relu(hiddenPreActivation) * secondWeight;
+            nnet::addBias(outputScores, secondBias);
+            return nnet::softmaxCrossEntropy(outputScores, target);
+        };
+        expectGradientMatches(tests, hiddenWeightLeaf,
+            [&](const nnet::Tensor& w) { return lossFrom(w, hiddenBias, outputWeight, outputBias); },
+            "hidden weight gradient through relu and softmax cross-entropy matches a finite difference");
+        expectGradientMatches(tests, hiddenBiasLeaf,
+            [&](const nnet::Tensor& b) { return lossFrom(hiddenWeight, b, outputWeight, outputBias); },
+            "hidden bias gradient through relu and softmax cross-entropy matches a finite difference");
+        expectGradientMatches(tests, outputWeightLeaf,
+            [&](const nnet::Tensor& w) { return lossFrom(hiddenWeight, hiddenBias, w, outputBias); },
+            "output weight gradient through softmax cross-entropy matches a finite difference");
+        expectGradientMatches(tests, outputBiasLeaf,
+            [&](const nnet::Tensor& b) { return lossFrom(hiddenWeight, hiddenBias, outputWeight, b); },
+            "output bias gradient through softmax cross-entropy matches a finite difference");
     }
     // ---- step 3: one value feeding two places -----------------------------
     // h feeds two separate sigmoid records. Both contributions must reach h

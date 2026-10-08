@@ -12,8 +12,53 @@ when the newer code produces a number, I check it against what this model
 produces for the same weights and input.
 
 The second is the actual framework, built around a `Tensor` type. It has components
-(`Dense`, `Sigmoid`, `Sequential`), parameters tied to gradients, an SGD optimizer, and automatic
+(`Dense`, `ReLU`, `Sigmoid`, `Sequential`), parameters tied to gradients, an SGD optimizer, and automatic
 differentiation, so a model can be trained without writing its backward pass by hand.
+
+## Recognizing handwritten digits
+
+The framework can train a network on MNIST, the standard set of 28x28
+handwritten digits: 60,000 images to train on and 10,000 test images it never
+sees during training. A network with one hidden layer of 128 units
+(784 -> 128 -> 10, ReLU, softmax cross-entropy, mini-batches of 64) gets
+97.55% of the test images right after 10 passes over the training set. Each
+pass takes about 8 seconds on one core of a Ryzen 9 9950X.
+
+```bash
+make mnist-data   # downloads MNIST into data/mnist/ and checks its checksums
+make mnist        # trains the network and tests it
+```
+
+Everything is seeded, so apart from the timings it prints the same numbers
+every time I run it:
+
+```text
+Before training: test accuracy 10.55% (guessing)
+Epoch  1 | training loss 0.3568 | test accuracy 93.65% | 8.0 s
+Epoch  2 | training loss 0.1918 | test accuracy 94.91% | 7.8 s
+...
+Epoch 10 | training loss 0.0550 | test accuracy 97.55% | 7.8 s
+
+Final test accuracy: 97.55% (9755 of 10000 images it never trained on)
+```
+
+At the end it draws some test images in the terminal with its guess, how sure
+it was, and the right answer, plus a few of the ones it gets wrong:
+
+```text
+        .--:.
+        +#*#%@%%%%%%%%%-
+              . ....:@@:
+                   :@@:
+                  -@%.
+                 :@%.
+                +@#.
+               %@+
+             -@@-
+            -@@@.
+            :==
+  guess 7 (99.9%) true 7
+```
 
 ## Where things stand
 
@@ -27,13 +72,13 @@ backward calculations with the reference model.
 
 ```text
 make test-reference   36 checks   the old MLP on its own, no tensor code linked
-make test-tensor     150 checks   Tensor, operations, layers, and autograd
+make test-tensor     205 checks   Tensor, operations, layers, autograd, training, MNIST loading
 make test-parity     104 checks   the framework compared against the old MLP
 ```
 
 The parity tests compute gradients three ways (the old model, a manual backward
 pass built from plain tensor operations, and autograd) and require all three to
-agree to within a 1e-12 tolerence. They also cover a three-layer network and a layer that is
+agree to within a 1e-12 tolerance. They also cover a three-layer network and a layer that is
 used twice in the same graph.
 
 Everything builds without warnings under `-Wall -Wextra -Wpedantic`, and all
@@ -48,10 +93,12 @@ make                 # builds build/reference_mlp
 make run             # runs the old reference model
 make test            # all three test suites
 make tensor-mlp      # trains the tensor-based model
+make mnist-data      # downloads MNIST (about 11 MB) into data/mnist/
+make mnist           # trains the digit classifier (always built with -O2)
 make graph           # plots the reference model's training loss
 ```
 
-The Makefile builds with `-O0` for debugging, which makes training slow. For a
+The Makefile builds with `-O0` for debugging, which makes training slow. For an
 optimized run, override the flags:
 
 ```bash
@@ -67,25 +114,32 @@ make -B test CXXFLAGS="-std=c++17 -g3 -O0 -fsanitize=address,undefined -fno-omit
 
 ## Training a model
 
-This is roughly what `examples/tensor_mlp.cpp` does:
+This is roughly what `examples/mnist.cpp` does:
 
 ```cpp
+std::mt19937 weightGenerator(42);
 std::vector<std::unique_ptr<nnet::Unary_Module>> layers;
-layers.push_back(std::make_unique<nnet::Dense>(8, 6));
-layers.push_back(std::make_unique<nnet::Sigmoid>());
-layers.push_back(std::make_unique<nnet::Dense>(6, 1));
-layers.push_back(std::make_unique<nnet::Sigmoid>());
-
+layers.push_back(std::make_unique<nnet::Dense>(784, 128, weightGenerator));
+layers.push_back(std::make_unique<nnet::ReLU>());
+layers.push_back(std::make_unique<nnet::Dense>(128, 10, weightGenerator));
 nnet::Sequential model(std::move(layers));
-std::vector<nnet::Parameter*> parameters = model.parameters();
 
-for (/* each training row */) {
-    // clear models gradients
-    model.zeroGrad();
-    nnet::Value prediction = model.forward(nnet::makeLeaf(input));
-    nnet::backward(nnet::binaryCrossEntropy(prediction, nnet::makeLeaf(target)));
-    nnet::sgdOptimizer(parameters, learningRate);
+std::mt19937 shuffleGenerator(42);
+for (int epoch = 0; epoch < epochs; epoch++) {
+    double trainingLoss = nnet::trainEpoch(model, train.images, train.labels, 64, 0.1,
+                                           nnet::softmaxCrossEntropy, shuffleGenerator);
 }
+double testAccuracy = nnet::accuracy(model, test.images, test.labels);
+```
+
+`trainEpoch` shuffles the rows, cuts them into batches, and runs one training
+step per batch. Written out by hand, one step is:
+
+```cpp
+model.zeroGrad();
+nnet::Value scores = model.forward(nnet::makeLeaf(batchImages));
+nnet::backward(nnet::softmaxCrossEntropy(scores, nnet::makeLeaf(batchLabels)));
+nnet::sgdOptimizer(parameters, learningRate);
 ```
 
 To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
@@ -93,7 +147,7 @@ To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
 ```cpp
 {
     nnet::NoGrad noGrad;
-    nnet::Value prediction = model.forward(nnet::makeLeaf(testData));
+    nnet::Value prediction = model.forward(nnet::makeLeaf(test.images));
 }
 ```
 
@@ -104,8 +158,8 @@ To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
 copies are always deep. There are no views and no broadcasting.
 
 **Operations** (`include/nnet/core/tensor_ops.h`) are free functions on Tensors:
-matrix multiply, bias add, sigmoid, binary cross-entropy, transpose, and a few
-more. Each differentiable one has a matching gradient function that's checked
+matrix multiply, bias add, sigmoid, ReLU, softmax, binary and softmax
+cross-entropy, transpose, and a few more. Each differentiable one has a matching gradient function that's checked
 against finite differences. Leading dimensions are treated as batch dimensions,
 so the same operations work on a single row or a stack of matrices.
 
@@ -116,11 +170,19 @@ fills in each gradient. A graph can only be used for one backward pass, and
 calling it a second time throws rather than counting the gradients twice.
 
 **Layers** (`include/nnet/nn/`) are built on top of autograd. A `Parameter` holds
-a value and its gradient together. `Dense` owns a weight and a bias, `Sigmoid`
-has no parameters, and `Sequential` chains layers. Layers don't have backward
+a value and its gradient together. `Dense` owns a weight and a bias, with the
+weight's starting values drawn from a seeded generator (He initialization).
+`Sigmoid` and `ReLU` have no parameters, and `Sequential` chains layers. Layers don't have backward
 methods at all; autograd handles that from the operations they use. When
 `backward` finishes, each layer's gradients end up in its Parameters, where the
 optimizer reads them.
+
+**Training** (`include/nnet/train/trainer.h`) is a few plain functions.
+`trainEpoch` does one shuffled pass over the data in mini-batches, and
+`evaluateLoss` and `accuracy` measure a model without building a graph. They
+take inputs and targets as Tensors, so they don't care where the data came
+from: `loadMnist` (`include/nnet/data/mnist.h`) reads the MNIST files into
+Tensors, and `DataFrame` does the same for CSV files.
 
 ## The reference model
 
@@ -149,24 +211,21 @@ Visual Studio build for Windows. There are two things to know before that:
 The Makefile assumes a Unix shell (`mkdir -p`, `./build/...`), so `make` won't
 run from `cmd.exe`.
 
-Weight initialization uses `rand() / RAND_MAX`. On Linux and macOS, `RAND_MAX`
-is 2147483647, but on MSVC it's only 32767, so on Windows every starting weight
-would come from about 32 thousand possible values instead of two billion, and
-the actual numbers would differ between platforms anyway. There's also no
-`srand()` call, so runs can't be seeded. Moving this to a seeded `std::mt19937`
-fixes both which will be implemented in the next commit.
-The train/test split in `DataFrame` already works that way.
+The tensor framework draws its starting weights from a seeded `std::mt19937`,
+the same way the train/test split in `DataFrame` works, so a run starts from
+the same weights every time. The legacy reference model still uses
+`rand() / RAND_MAX`, because its output is the baseline everything else gets
+checked against. On Linux and macOS `RAND_MAX` is 2147483647, but on MSVC it's
+only 32767, so that model's starting weights would be much coarser on Windows.
 
 The loss graph (`make graph`) needs matplotlib and a desktop session. It works
 on macOS out of the box and on Linux with a display (WSLg under WSL).
 
 ## What's next
 
-- Seeded weight initialization, so training runs can be reproduced on purpose.
-- Mini-batches instead of one row at a time. Autograd currently builds a whole
-  graph per row, which is where most of the training time goes.
-- More activations and losses beyond sigmoid and binary cross-entropy.
-- Saving and loading trained models.
+- More layer types and losses than the ones I have so far.
+- Saving and loading trained models, so the digit classifier doesn't have to
+  retrain every time it runs.
 
 Longer term, I want this to be a core that can support quite different kinds of
 models (language, vision, games, quantitative work) sharing the same operations

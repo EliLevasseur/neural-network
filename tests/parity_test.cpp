@@ -8,6 +8,7 @@
 #include "nnet/nn/sequential.h"
 
 #include <memory>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -93,9 +94,11 @@ namespace {
     AutogradModel buildAutogradModel(const std::vector<LayerWeights>& weights) {
         AutogradModel result;
         std::vector<std::unique_ptr<nnet::Unary_Module>> components;
+        // The legacy weights are copied in right after, so the seed is unused.
+        std::mt19937 generator(1);
         for (const LayerWeights& layer : weights) {
             auto dense = std::make_unique<nnet::Dense>(
-                layer.weight.shape()[0], layer.weight.shape()[1]);
+                layer.weight.shape()[0], layer.weight.shape()[1], generator);
             dense->weight.value = layer.weight;
             dense->bias.value = layer.bias;
             result.layers.push_back(dense.get());
@@ -197,7 +200,8 @@ namespace {
     void checkReusedDense(TestRunner& tests) {
         tests.section("ONE DENSE, TWO INVOCATIONS (AUTOGRAD)");
 
-        nnet::Dense shared(1, 1);
+        std::mt19937 generator(1);
+        nnet::Dense shared(1, 1, generator);
         shared.weight.value.at({0, 0}) = 0.7;
         shared.bias.value.at({0}) = -0.2;
         const nnet::Tensor target({1, 1}, {1.0});
