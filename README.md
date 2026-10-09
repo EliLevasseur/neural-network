@@ -83,38 +83,61 @@ agree to within a 1e-12 tolerance. They also cover a three-layer network and a l
 used twice in the same graph.
 
 The optimizers have their own test program, `tests/optimizer_test.cpp` (46
-checks), which builds on its own with the command at the top of the file.
+checks), which CTest runs automatically, or can be built with the command at the top of the file.
 
 Everything builds without warnings under `-Wall -Wextra -Wpedantic`, and all
 three suites pass under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Building
 
-You need a C++17 compiler and GNU Make. I build with GCC 16 on Fedora.
+Use CMake 3.20+, GCC with C++17 support, and GNU Make inside Fedora WSL:
+
+```bash
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
+```
+
+CMake builds reusable libraries and separate examples/tests. CTest runs all four
+suites, including the optimizer checks: 411 checks in total. The reference
+executable remains independent of Tensor/autograd.
+
+Use `checked`, `release`, or `asan` in place of `debug` for checked libstdc++,
+optimized training, or AddressSanitizer/UndefinedBehaviorSanitizer. Build
+directories are separate and each includes `compile_commands.json`.
+
+```bash
+cmake --preset release
+cmake --build --preset release
+./build/cmake-release/tensor_mlp
+make mnist-data
+./build/cmake-release/mnist
+```
+
+Run examples from the repository root so their relative dataset paths resolve.
+Use Release for MNIST; the CMake Debug build deliberately stays unoptimized.
+Builds and tests do not download datasets.
+
+See [the CMake guide](cmake/README.md) for targets, presets, installation, and a
+separate example project that links the installed framework using
+`find_package(nnet CONFIG REQUIRED)`.
+
+The original Make workflow remains available:
 
 ```bash
 make                 # builds build/reference_mlp
 make run             # runs the old reference model
-make test            # all three test suites
+make test            # reference, Tensor and parity suites
 make tensor-mlp      # trains the tensor-based model
-make mnist-data      # downloads MNIST (about 11 MB) into data/mnist/
-make mnist           # trains the digit classifier (always built with -O2)
+make mnist-data      # downloads MNIST and checks its checksums
+make mnist           # trains the digit classifier (built with -O2)
 make graph           # plots the reference model's training loss
 ```
 
-The Makefile builds with `-O0` for debugging, which makes training slow. For an
-optimized run, override the flags:
-
-```bash
-make -B tensor-mlp CXXFLAGS="-std=c++17 -O2 -Wall -Wextra -Wpedantic -Iinclude"
-```
-
-To run the tests under the sanitizers (on Fedora this needs the `libasan` and
-`libubsan` packages downloadable via dnf):
-
-```bash
-make -B test CXXFLAGS="-std=c++17 -g3 -O0 -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Iinclude"
-```
+Make still builds three suites; CTest includes the standalone optimizer suite
+as its fourth. With Make, supply `CXXFLAGS` and `-B` to change build modes;
+with CMake, use the presets. GCC Debug, checked, Release and ASan/UBSan CMake
+builds are verified locally. Hosted CI and Clang verification remain pending.
 
 ## Training a model
 
