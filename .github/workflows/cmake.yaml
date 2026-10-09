@@ -1,0 +1,99 @@
+name: CMake
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cmake-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.compiler }} ${{ matrix.build_type }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cxx: g++
+            build_type: Debug
+          - compiler: gcc
+            cxx: g++
+            build_type: Release
+          - compiler: clang
+            cxx: clang++
+            build_type: Debug
+          - compiler: clang
+            cxx: clang++
+            build_type: Release
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build/ci-${{ matrix.compiler }}-${{ matrix.build_type }}
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCMAKE_CXX_FLAGS=-Werror
+
+      - name: Build
+        run: >
+          cmake --build build/ci-${{ matrix.compiler }}-${{ matrix.build_type }}
+          --parallel 2
+
+      - name: Test
+        run: >
+          ctest --test-dir build/ci-${{ matrix.compiler }}-${{ matrix.build_type }}
+          --output-on-failure
+
+      - name: Install package
+        run: >
+          cmake --install build/ci-${{ matrix.compiler }}-${{ matrix.build_type }}
+          --prefix "$GITHUB_WORKSPACE/build/ci-install"
+
+      - name: Configure installed consumer
+        run: >
+          cmake -S tests/cmake/consumer -B build/ci-consumer
+          -G Ninja
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/ci-install"
+          -DCMAKE_CXX_FLAGS=-Werror
+
+      - name: Build installed consumer
+        run: cmake --build build/ci-consumer --parallel 2
+
+      - name: Test installed consumer
+        run: ctest --test-dir build/ci-consumer --output-on-failure
+
+  sanitizers:
+    name: GCC ASan and UBSan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build/ci-asan
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_CXX_FLAGS=-Werror
+          -DNNET_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build/ci-asan --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build/ci-asan --output-on-failure
