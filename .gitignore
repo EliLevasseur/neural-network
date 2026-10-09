@@ -4,3 +4,4 @@ docs/
 ROADMAP.md
 CLAUDE.md
 env/
+data/mnist/

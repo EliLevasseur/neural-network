@@ -24,6 +24,8 @@ const std::string mnistFolder = "data/mnist/";
 const std::size_t pixelsPerImage = 784;
 const std::size_t hiddenUnits = 128;
 const std::size_t digitCount = 10;
+// held back from the 60,000 training images; the test images are only scored at the end
+const std::size_t validationImages = 10000;
 const int epochs = 10;
 const std::size_t batchSize = 64;
 const double learningRate = 0.1;
@@ -97,7 +99,7 @@ nnet::MnistData loadOrExplain(const std::string& imageFile, const std::string& l
 }
 
 int main() {
-    const nnet::MnistData train = loadOrExplain("train-images-idx3-ubyte", "train-labels-idx1-ubyte");
+    const nnet::MnistData mnistTrain = loadOrExplain("train-images-idx3-ubyte", "train-labels-idx1-ubyte");
     const nnet::MnistData test = loadOrExplain("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte");
 
     // Dense, ReLU, Dense. The last layer has no activation: the loss applies
@@ -109,20 +111,25 @@ int main() {
     components.push_back(std::make_unique<nnet::Dense>(hiddenUnits, digitCount, weightGenerator));
     nnet::Sequential model(std::move(components));
 
+    std::mt19937 validationGenerator(randomSeed);
+    const nnet::TrainValidationSplit train = nnet::splitOffValidation(
+        mnistTrain.images, mnistTrain.labels, validationImages, validationGenerator);
+
     std::cout << "Training a " << pixelsPerImage << " -> " << hiddenUnits << " -> " << digitCount
-              << " network on " << train.images.shape()[0] << " MNIST images"
+              << " network on " << train.trainInputs.shape()[0] << " MNIST images"
               << " (batches of " << batchSize << ", learning rate " << learningRate << ")\n"
-              << "Before training: test accuracy " << percent(nnet::accuracy(model, test.images, test.labels))
-              << " (guessing)\n";
+              << "Before training: validation accuracy "
+              << percent(nnet::accuracy(model, train.validationInputs, train.validationTargets)) << " (guessing)\n";
 
     std::mt19937 shuffleGenerator(randomSeed);
+    nnet::SGDOptimizer optimizer(model.parameters(), learningRate);
     for (int epoch = 1; epoch <= epochs; epoch++) {
         const auto start = std::chrono::steady_clock::now();
-        const double trainingLoss = nnet::trainEpoch(model, train.images, train.labels,
-            batchSize, learningRate, nnet::softmaxCrossEntropy, shuffleGenerator);
+        const double trainingLoss = nnet::trainEpoch(model, train.trainInputs, train.trainTargets,
+            batchSize, optimizer, nnet::softmaxCrossEntropy, shuffleGenerator);
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        std::printf("Epoch %2d | training loss %.4f | test accuracy %s | %.1f s\n",
-            epoch, trainingLoss, percent(nnet::accuracy(model, test.images, test.labels)).c_str(), seconds);
+        std::printf("Epoch %2d | training loss %.4f | validation accuracy %s | %.1f s\n", epoch, trainingLoss,
+            percent(nnet::accuracy(model, train.validationInputs, train.validationTargets)).c_str(), seconds);
     }
 
     // One pass over the test set with no graph recorded, turned into

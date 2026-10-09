@@ -3,46 +3,42 @@
 
 #include "nnet/core/autograd/value.h"
 #include "nnet/nn/module.h"
+#include "nnet/optim/optimizer.h"
 
 #include <cstddef>
 #include <random>
 #include <vector>
 
-// The training loop every example shares. These are plain functions rather
-// than a class because there is nothing for a trainer to own: the model owns
-// its parameters, autograd builds and releases a graph per step, and the
-// caller owns the data and the random generator.
-//
-// Data comes in as two rank-2 Tensors with one row per example: `inputs` is
-// [rows, features] and `targets` is [rows, columns]. Any loader that produces
-// those (DataFrame for CSVs, an image reader, ...) works with these functions.
+// inputs are [rows, features], targets are [rows, columns]
 
 namespace nnet {
 
-    // Any loss shaped like binaryCrossEntropy and softmaxCrossEntropy: it takes
-    // the model's output and the targets, and returns a {1}-shaped Value.
+    // binaryCrossEntropy or softmaxCrossEntropy
     using LossFunction = Value (*)(const Value& prediction, const Value& target);
 
-    // Copies the listed rows into a new Tensor, in the order given. The result
-    // keeps every dimension except the first, which becomes rowIndices.size().
+    // copies the listed rows, in that order
     Tensor takeRows(const Tensor& data, const std::vector<std::size_t>& rowIndices);
 
-    // One pass over every row, in an order shuffled by `generator`, cut into
-    // batches of `batchSize` rows (the last one may be shorter). Each batch
-    // runs zeroGrad, forward, loss, backward, and one SGD step. Returns the
-    // loss averaged over every row, as measured while training.
+    struct TrainValidationSplit {
+        Tensor trainInputs;
+        Tensor trainTargets;
+        Tensor validationInputs;
+        Tensor validationTargets;
+    };
+
+    // same idea as DataFrame::trainTestSplit: shuffle the rows, cut off validationRows of them
+    TrainValidationSplit splitOffValidation(const Tensor& inputs, const Tensor& targets,
+                                            std::size_t validationRows, std::mt19937& generator);
+
+    // one shuffled pass in batches, one optimizer step per batch; returns the average loss
     double trainEpoch(Unary_Module& model, const Tensor& inputs, const Tensor& targets,
-                      std::size_t batchSize, double learningRate,
+                      std::size_t batchSize, Optimizer& optimizer,
                       LossFunction loss, std::mt19937& generator);
 
-    // The loss over all rows at once, without recording a graph.
     double evaluateLoss(const Unary_Module& model, const Tensor& inputs, const Tensor& targets,
                         LossFunction loss);
 
-    // The fraction of rows the model gets right, without recording a graph.
-    // With one target column, the output is read as a probability and counts
-    // as "yes" at 0.5 or above. With several columns, the column with the
-    // highest score is the guess, which matches a one-hot target's 1.
+    // one column: >= 0.5 counts as yes. several columns: highest score is the guess
     double accuracy(const Unary_Module& model, const Tensor& inputs, const Tensor& targets);
 
 }

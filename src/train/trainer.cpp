@@ -1,7 +1,6 @@
 #include "nnet/train/trainer.h"
 
 #include "nnet/core/autograd/backward.h"
-#include "optim/sgd.h"
 
 #include <algorithm>
 #include <numeric>
@@ -41,8 +40,27 @@ namespace nnet {
         return Tensor(shape, std::move(selected));
     }
 
+    TrainValidationSplit splitOffValidation(const Tensor& inputs, const Tensor& targets,
+                                            std::size_t validationRows, std::mt19937& generator) {
+        checkExamples(inputs, targets);
+        const std::size_t rowCount = inputs.shape()[0];
+        if (validationRows == 0 || validationRows >= rowCount) {
+            throw std::invalid_argument("Validation needs at least one row and must leave at least one training row");
+        }
+
+        std::vector<std::size_t> order(rowCount);
+        std::iota(order.begin(), order.end(), 0);
+        std::shuffle(order.begin(), order.end(), generator);
+
+        // the same index lists go to inputs and targets so every row keeps its label
+        const std::vector<std::size_t> validationIndices(order.begin(), order.begin() + validationRows);
+        const std::vector<std::size_t> trainIndices(order.begin() + validationRows, order.end());
+        return TrainValidationSplit{takeRows(inputs, trainIndices), takeRows(targets, trainIndices),
+                                    takeRows(inputs, validationIndices), takeRows(targets, validationIndices)};
+    }
+
     double trainEpoch(Unary_Module& model, const Tensor& inputs, const Tensor& targets,
-                      std::size_t batchSize, double learningRate,
+                      std::size_t batchSize, Optimizer& optimizer,
                       LossFunction loss, std::mt19937& generator) {
         checkExamples(inputs, targets);
         if (batchSize == 0) {
@@ -54,7 +72,6 @@ namespace nnet {
         std::iota(order.begin(), order.end(), 0);
         std::shuffle(order.begin(), order.end(), generator);
 
-        std::vector<Parameter*> parameters = model.parameters();
         double weightedLossTotal = 0.0;
         for (std::size_t batchStart = 0; batchStart < rowCount; batchStart += batchSize) {
             const std::size_t batchEnd = std::min(batchStart + batchSize, rowCount);
@@ -63,11 +80,10 @@ namespace nnet {
             model.zeroGrad();
             const Value prediction = model.forward(makeLeaf(takeRows(inputs, batchRows)));
             const Value batchLoss = loss(prediction, makeLeaf(takeRows(targets, batchRows)));
-            // Each batch's loss is already an average over its own rows, so it
-            // is weighted by its row count; a short last batch counts for less.
+            // weight by row count so a short last batch counts for less
             weightedLossTotal += batchLoss->data.at({0}) * static_cast<double>(batchRows.size());
             backward(batchLoss);
-            sgdOptimizer(parameters, learningRate);
+            optimizer.step();
         }
         return weightedLossTotal / static_cast<double>(rowCount);
     }

@@ -11,7 +11,7 @@ NETWORK_SOURCES := src/network.cpp src/training.cpp
 DATAFRAME_SOURCE := src/dataframe.cpp
 AUTOGRAD_SOURCES := src/autograd/operations.cpp src/autograd/backward.cpp
 # The trainer runs SGD steps, so the two are always linked together.
-TRAINER_SOURCES := src/train/trainer.cpp src/optim/sgd.cpp
+TRAINER_SOURCES := src/train/trainer.cpp src/optim/optimizer.cpp
 # Loaders that turn a dataset's own file format into input and target Tensors.
 DATA_SOURCES := src/data/mnist.cpp
 TENSOR_SOURCES := src/core/tensor.cpp src/core/tensor_dataframe.cpp src/core/tensor_ops.cpp $(AUTOGRAD_SOURCES) $(TRAINER_SOURCES) $(DATA_SOURCES)
@@ -39,7 +39,7 @@ TENSOR_MLP_BINARY := build/tensor_mlp
 MNIST_SOURCE := examples/mnist.cpp
 MNIST_BINARY := build/mnist
 
-HEADERS := $(wildcard include/*.h include/nnet/core/*.h include/nnet/core/autograd/*.h include/nnet/nn/*.h include/nnet/train/*.h include/nnet/data/*.h include/optim/*.h)
+HEADERS := $(wildcard include/*.h include/nnet/core/*.h include/nnet/core/autograd/*.h include/nnet/nn/*.h include/nnet/train/*.h include/nnet/data/*.h include/nnet/optim/*.h)
 
 .PHONY: build run test test-reference test-tensor test-parity tensor-mlp mnist mnist-data graph
 

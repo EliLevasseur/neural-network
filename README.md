@@ -12,17 +12,19 @@ when the newer code produces a number, I check it against what this model
 produces for the same weights and input.
 
 The second is the actual framework, built around a `Tensor` type. It has components
-(`Dense`, `ReLU`, `Sigmoid`, `Sequential`), parameters tied to gradients, an SGD optimizer, and automatic
-differentiation, so a model can be trained without writing its backward pass by hand.
+(`Dense`, `ReLU`, `Sigmoid`, `Sequential`), parameters tied to gradients, SGD, momentum and Adam
+optimizers, and automatic differentiation, so a model can be trained without writing its backward
+pass by hand.
 
 ## Recognizing handwritten digits
 
 The framework can train a network on MNIST, the standard set of 28x28
-handwritten digits: 60,000 images to train on and 10,000 test images it never
-sees during training. A network with one hidden layer of 128 units
-(784 -> 128 -> 10, ReLU, softmax cross-entropy, mini-batches of 64) gets
-97.55% of the test images right after 10 passes over the training set. Each
-pass takes about 8 seconds on one core of a Ryzen 9 9950X.
+handwritten digits. I train on 50,000 of the training images, keep the other
+10,000 aside as a validation set to watch during training, and only score the
+10,000 test images once, at the very end. A network with one hidden layer of
+128 units (784 -> 128 -> 10, ReLU, softmax cross-entropy, mini-batches of 64)
+gets 97.07% of the test images right after 10 passes over the training set.
+Each pass takes about 6.5 seconds on one core of a Ryzen 9 9950X.
 
 ```bash
 make mnist-data   # downloads MNIST into data/mnist/ and checks its checksums
@@ -33,13 +35,13 @@ Everything is seeded, so apart from the timings it prints the same numbers
 every time I run it:
 
 ```text
-Before training: test accuracy 10.55% (guessing)
-Epoch  1 | training loss 0.3568 | test accuracy 93.65% | 8.0 s
-Epoch  2 | training loss 0.1918 | test accuracy 94.91% | 7.8 s
+Before training: validation accuracy 10.52% (guessing)
+Epoch  1 | training loss 0.3799 | validation accuracy 92.48% | 6.4 s
+Epoch  2 | training loss 0.2064 | validation accuracy 94.55% | 6.4 s
 ...
-Epoch 10 | training loss 0.0550 | test accuracy 97.55% | 7.8 s
+Epoch 10 | training loss 0.0609 | validation accuracy 97.12% | 6.2 s
 
-Final test accuracy: 97.55% (9755 of 10000 images it never trained on)
+Final test accuracy: 97.07% (9707 of 10000 images it never trained on)
 ```
 
 At the end it draws some test images in the terminal with its guess, how sure
@@ -62,17 +64,16 @@ it was, and the right answer, plus a few of the ones it gets wrong:
 
 ## Where things stand
 
-The Tensor example now uses the same seeded 80/20 split as the vector
-reference: it updates weights using training rows only, reports training loss
-each epoch, and evaluates test loss and accuracy once after training. The
-fixed-fixture parity tests continue to compare the framework's forward and
-backward calculations with the reference model.
+Both examples split a validation set off their training data, watch it during
+training, and only evaluate the test set once at the end. The fixed-fixture
+parity tests still compare the framework's forward and backward calculations
+with the reference model.
 
 `make test` builds three test programs that AI has helped me write to make sure I cover all test cases:
 
 ```text
 make test-reference   36 checks   the old MLP on its own, no tensor code linked
-make test-tensor     205 checks   Tensor, operations, layers, autograd, training, MNIST loading
+make test-tensor     225 checks   Tensor, operations, layers, autograd, training, MNIST loading, checkpoints
 make test-parity     104 checks   the framework compared against the old MLP
 ```
 
@@ -80,6 +81,9 @@ The parity tests compute gradients three ways (the old model, a manual backward
 pass built from plain tensor operations, and autograd) and require all three to
 agree to within a 1e-12 tolerance. They also cover a three-layer network and a layer that is
 used twice in the same graph.
+
+The optimizers have their own test program, `tests/optimizer_test.cpp` (46
+checks), which builds on its own with the command at the top of the file.
 
 Everything builds without warnings under `-Wall -Wextra -Wpedantic`, and all
 three suites pass under AddressSanitizer and UndefinedBehaviorSanitizer.
@@ -124,13 +128,21 @@ layers.push_back(std::make_unique<nnet::ReLU>());
 layers.push_back(std::make_unique<nnet::Dense>(128, 10, weightGenerator));
 nnet::Sequential model(std::move(layers));
 
+std::mt19937 splitGenerator(42);
+nnet::TrainValidationSplit train = nnet::splitOffValidation(mnist.images, mnist.labels, 10000, splitGenerator);
+
+nnet::SGDOptimizer optimizer(model.parameters(), 0.1);
 std::mt19937 shuffleGenerator(42);
 for (int epoch = 0; epoch < epochs; epoch++) {
-    double trainingLoss = nnet::trainEpoch(model, train.images, train.labels, 64, 0.1,
+    double trainingLoss = nnet::trainEpoch(model, train.trainInputs, train.trainTargets, 64, optimizer,
                                            nnet::softmaxCrossEntropy, shuffleGenerator);
+    double validationAccuracy = nnet::accuracy(model, train.validationInputs, train.validationTargets);
 }
 double testAccuracy = nnet::accuracy(model, test.images, test.labels);
 ```
+
+Swapping `SGDOptimizer` for `MomentumOptimizer` or `AdamOptimizer` is the only
+change needed to train with those instead.
 
 `trainEpoch` shuffles the rows, cuts them into batches, and runs one training
 step per batch. Written out by hand, one step is:
@@ -139,7 +151,7 @@ step per batch. Written out by hand, one step is:
 model.zeroGrad();
 nnet::Value scores = model.forward(nnet::makeLeaf(batchImages));
 nnet::backward(nnet::softmaxCrossEntropy(scores, nnet::makeLeaf(batchLabels)));
-nnet::sgdOptimizer(parameters, learningRate);
+optimizer.step();
 ```
 
 To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
@@ -149,6 +161,14 @@ To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
     nnet::NoGrad noGrad;
     nnet::Value prediction = model.forward(nnet::makeLeaf(test.images));
 }
+```
+
+A trained model can be saved and loaded again. The file only holds the numbers,
+so the model has to be built the same way in code before loading:
+
+```cpp
+nnet::saveParameters(model, "mnist.ckpt");
+nnet::loadParameters(model, "mnist.ckpt");
 ```
 
 ## How it's put together
@@ -177,12 +197,24 @@ methods at all; autograd handles that from the operations they use. When
 `backward` finishes, each layer's gradients end up in its Parameters, where the
 optimizer reads them.
 
+**Optimizers** (`include/nnet/optim/optimizer.h`) all share one small
+`Optimizer` base class with a `step()`. SGD, momentum and Adam each keep
+whatever they need between steps (momentum a velocity per weight, Adam a
+velocity and an average of squared gradients), and skip frozen parameters.
+
 **Training** (`include/nnet/train/trainer.h`) is a few plain functions.
-`trainEpoch` does one shuffled pass over the data in mini-batches, and
+`trainEpoch` does one shuffled pass over the data in mini-batches with any
+optimizer, `splitOffValidation` sets aside a validation set, and
 `evaluateLoss` and `accuracy` measure a model without building a graph. They
 take inputs and targets as Tensors, so they don't care where the data came
 from: `loadMnist` (`include/nnet/data/mnist.h`) reads the MNIST files into
-Tensors, and `DataFrame` does the same for CSV files.
+Tensors, and `DataFrame` does the same for CSV files. Nothing has to go
+through the trainer, though. A model that doesn't fit it can call `forward`,
+`backward` and `step()` itself.
+
+**Checkpoints** (`include/nnet/nn/checkpoint.h`) save each parameter's name,
+shape and values to a binary file, and refuse to load a file that doesn't
+match the model.
 
 ## The reference model
 
@@ -223,9 +255,8 @@ on macOS out of the box and on Linux with a display (WSLg under WSL).
 
 ## What's next
 
+- Measuring where the training time actually goes, then making it faster.
 - More layer types and losses than the ones I have so far.
-- Saving and loading trained models, so the digit classifier doesn't have to
-  retrain every time it runs.
 
 Longer term, I want this to be a core that can support quite different kinds of
 models (language, vision, games, quantitative work) sharing the same operations
