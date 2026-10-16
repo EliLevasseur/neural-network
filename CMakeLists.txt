@@ -101,6 +101,18 @@ if(NNET_BUILD_EXAMPLES)
     add_executable(mnist examples/mnist.cpp)
     nnet_configure_target(mnist)
     target_link_libraries(mnist PRIVATE nnet_framework nnet_data)
+
+    add_executable(connect4
+        examples/connect4/main.cpp
+        examples/connect4/connect_four.cpp)
+    nnet_configure_target(connect4)
+    target_link_libraries(connect4 PRIVATE nnet_framework)
+
+    add_executable(connect4_simulations
+        examples/connect4/simulations.cpp
+        examples/connect4/connect_four.cpp)
+    nnet_configure_target(connect4_simulations)
+    target_link_libraries(connect4_simulations PRIVATE nnet_framework)
 endif()
 
 if(BUILD_TESTING)
