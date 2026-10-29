@@ -18,6 +18,8 @@ class Tensor {
 		std::size_t numel() const;
 
 		const std::vector<double>& getData() const;
+		double* data();
+		const double* data() const;
 
 		const Shape& strides() const;
 		const Shape& shape() const;
@@ -36,9 +38,13 @@ class Tensor {
 		
 		// Operator overloaders
 		Tensor operator+(const Tensor& other) const;
+		Tensor& operator+=(const Tensor& other);
 		Tensor operator*(double scalar) const;
 		Tensor operator*(const Tensor& other) const;
 		Tensor operator-(const Tensor& other) const;
+
+		// Legacy operations
+		Tensor naiveMatmul(const Tensor& other) const ;
 
 	private:
 		Shape shape_;

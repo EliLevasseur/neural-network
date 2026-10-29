@@ -20,21 +20,21 @@ namespace nnet {
 
     void matmulRecord::sendGradBackward(const Tensor& gradientOfOutput) {
         // one gradient for each input
-        inputs[0]->grad = inputs[0]->grad + matmulGradInput(gradientOfOutput, inputs[1]->data);
+        inputs[0]->grad += matmulGradInput(gradientOfOutput, inputs[1]->data);
         // A weight shared by every group in a batched input collects one
         // contribution per group, so fold them back to the weight's own shape.
-        inputs[1]->grad = inputs[1]->grad + sumLeadingDimensions(
+        inputs[1]->grad += sumLeadingDimensions(
             matmulGradWeight(inputs[0]->data, gradientOfOutput), inputs[1]->data.rank());
     }
 
     void BiasAddRecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        inputs[0]->grad = inputs[0]->grad + gradientOfOutput;
-        inputs[1]->grad = inputs[1]->grad + addBiasGrad(gradientOfOutput, inputs[1]->data);
+        inputs[0]->grad += gradientOfOutput;
+        inputs[1]->grad += addBiasGrad(gradientOfOutput, inputs[1]->data);
     }
 
     void AddRecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        inputs[0]->grad = inputs[0]->grad + gradientOfOutput;
-        inputs[1]->grad = inputs[1]->grad + gradientOfOutput;
+        inputs[0]->grad += gradientOfOutput;
+        inputs[1]->grad += gradientOfOutput;
     }
 
     // Only the prediction gets a gradient. The target is data, so nothing
@@ -42,14 +42,14 @@ namespace nnet {
     void LossRecord::sendGradBackward(const Tensor& gradientOfOutput) {
         Tensor contribution = binaryCrossEntropyGrad(inputs[0]->data, inputs[1]->data);
         contribution = contribution * gradientOfOutput.at({0});
-        inputs[0]->grad = inputs[0]->grad + contribution;
+        inputs[0]->grad += contribution;
     }
 
     // Same shape as LossRecord: only the scores get a gradient.
     void SoftmaxCrossEntropyRecord::sendGradBackward(const Tensor& gradientOfOutput) {
         Tensor contribution = softmaxCrossEntropyGrad(inputs[0]->data, inputs[1]->data);
         contribution = contribution * gradientOfOutput.at({0});
-        inputs[0]->grad = inputs[0]->grad + contribution;
+        inputs[0]->grad += contribution;
     }
 
     // ---- forward halves ----------------------------------------------------

@@ -29,7 +29,7 @@ namespace nnet {
 		for (size_t i = 0; i < input_data.size(); ++i) {
 			out[i] = 1 / (1 + std::exp(-input_data[i]));
 		}
-		return Tensor(tensor.shape(), out);
+		return Tensor(tensor.shape(), std::move(out));
 	}
 
 	Tensor relu(const Tensor& tensor) {
@@ -38,7 +38,7 @@ namespace nnet {
 		for (size_t i = 0; i < input_data.size(); ++i) {
 			out[i] = std::max(0.0, input_data[i]);
 		}
-		return Tensor(tensor.shape(), out);
+		return Tensor(tensor.shape(), std::move(out));
 	}
 
 	Tensor softmax(const Tensor& scores) {
@@ -102,7 +102,6 @@ namespace nnet {
 	}
 
 	void addBias(Tensor& tensor, const Tensor& bias) {
-
 		if (bias.rank() != 1)
 			throw std::invalid_argument("Bias must be rank 1");
 
@@ -112,22 +111,19 @@ namespace nnet {
 			throw std::invalid_argument("Bias length must equal the last dimension of the tensor");
 		}
 
-		// Whatever the rank, the tensor is a stack of rows `width` wide.
-		// Every leading dimension is a batch dimension and is walked by the
-		// odometer at the bottom of the loop.
 		const std::size_t rows = tensor.numel() / width;
-		Tensor::Shape indices(tensor.rank(), 0);
+		
+		// Gain direct reference/pointer access to the underlying flat data vectors
+		auto* tensorData = tensor.data(); // Assumes data() returns std::vector<double>& or similar
+		const auto* biasData = bias.data();
 
+		// Loop directly over the flat structure without N-dimensional overhead
 		for (std::size_t row = 0; row < rows; row++) {
+			std::size_t rowStart = row * width;
+			
 			for (std::size_t col = 0; col < width; col++) {
-				indices[tensor.rank() - 1] = col;
-				tensor.at(indices) += bias.at({col});
-			}
-
-			// Advance every axis except the last, carrying like an odometer.
-			for (std::size_t axis = tensor.rank() - 1; axis-- > 0;) {
-				if (++indices[axis] < tensor.shape()[axis]) break;
-				indices[axis] = 0;
+				// Correct flat index: base of the row + current column offset
+				tensorData[rowStart + col] += biasData[col];
 			}
 		}
 	}

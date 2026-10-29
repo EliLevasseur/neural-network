@@ -52,6 +52,14 @@ const std::vector<double>& Tensor::getData() const {
 	return data_;
 }
 
+double* Tensor::data() {
+	return data_.data();
+}
+
+const double* Tensor::data() const {
+	return data_.data();
+}
+
 const Tensor::Shape& Tensor::strides() const {
 	return strides_;
 	}
@@ -103,6 +111,16 @@ Tensor Tensor::operator+(const Tensor& other) const {
 	return Tensor(shape_, std::move(values));
 }
 
+Tensor& Tensor::operator+=(const Tensor& other) {
+    if (shape_ != other.shape_)
+        throw std::invalid_argument("Tensors must be of same size for addition");
+
+    for (std::size_t i = 0; i < data_.size(); i++) {
+        data_[i] += other.data_[i];
+    }
+    return *this;
+}
+
 Tensor Tensor::operator*(double scalar) const {
 	std::vector<double> values(data_.size());
 
@@ -112,8 +130,70 @@ Tensor Tensor::operator*(double scalar) const {
 	return Tensor(shape_, std::move(values));
 }
 
-// N dimension matrix multiplication baby ;)
 Tensor Tensor::operator*(const Tensor& other) const {
+
+    if (rank() < 2 || other.shape_.size() < 2) {
+        throw std::invalid_argument(
+            "Matrix multiplication requires rank >= 2");
+    }
+
+	if (other.shape_.size() != rank() && other.shape_.size() != 2) {
+        throw std::invalid_argument(
+            "Right operand must match the left rank or be rank 2");
+    }
+
+    if (other.shape_.size() == rank()) {
+        for (std::size_t axis = 0; axis < rank() - 2; ++axis) {
+            if (shape_[axis] != other.shape_[axis]) {
+                throw std::invalid_argument("Batch dimensions must match");
+            }
+        }
+    }
+
+	const std::size_t rows = shape_[rank() - 2];
+	const std::size_t inner = shape_[rank() - 1];
+	const std::size_t cols = other.shape_[other.rank() - 1];
+
+	Shape outputShape = shape_;
+	outputShape.back() = cols;
+
+	if (inner != other.shape_[other.shape_.size() - 2]) {
+        throw std::invalid_argument(
+            "Left columns must equal right rows");
+    }
+
+	const std::size_t batches = data_.size() / rows / inner;
+	const std::size_t rightBatches = other.data_.size() / inner / cols;
+
+    std::vector<double> values(batches * rows * cols, 0.0);
+
+
+
+	for (std::size_t batch = 0; batch < batches; batch++) {
+		std::size_t leftStart = batch * rows * inner;
+		std::size_t rightStart = (rightBatches == 1) ? 0 : batch * cols * inner;
+		std::size_t outputStart = batch * rows * cols;
+
+		for (std::size_t row = 0; row < rows; row++) {
+			for (std::size_t k = 0; k < inner; k++) {
+				double rvalue = data_[leftStart + row * inner + k];
+
+				for (std::size_t col = 0; col < cols; col++) {
+					double lvalue = other.data_[rightStart + k * cols + col];
+					values[outputStart + row * cols + col] += rvalue * lvalue;
+				}
+			}
+
+		}
+	}
+
+	return Tensor(std::move(outputShape), std::move(values));
+
+}
+
+// LEGACY MATMUL
+// N dimension matrix multiplication baby ;)
+Tensor Tensor::naiveMatmul(const Tensor& other) const {
     if (rank() < 2 || other.shape_.size() < 2) {
         throw std::invalid_argument(
             "Matrix multiplication requires rank >= 2");

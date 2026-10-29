@@ -14,10 +14,11 @@
 #include "nnet/nn/sequential.h"
 #include "nnet/train/trainer.h"
 #include "nnet/nn/checkpoint.h"
+#include <chrono>
 
 // Eight inputs, two hidden layers, one output.
 const std::vector<std::size_t> networkShape = {8, 6, 4, 1};
-const int epochs = 100;
+const int epochs = 10;
 const double learningRate = 0.5;
 // One row per SGD step, as the legacy trainer does.
 const std::size_t batchSize = 1;
@@ -28,6 +29,7 @@ const std::size_t randomSeed = 42;
 
 
 int main() {
+    auto start = std::chrono::high_resolution_clock::now();
     DataFrame data("data/complex_8d_test.csv", 8);
     const splitContainer split = data.trainTestSplit(trainSplit, randomSeed);
     std::mt19937 validationGenerator(randomSeed);
@@ -61,5 +63,10 @@ int main() {
     std::cout << "Test accuracy: " << nnet::accuracy(model, testPredictors, testTargets) << '\n'
               << "Test loss: "
               << nnet::evaluateLoss(model, testPredictors, testTargets, nnet::binaryCrossEntropy) << '\n';
+    auto end = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+    std::cout << "\n RUNTIME: " << ms << "ms\n";
+
     return 0;
 }
