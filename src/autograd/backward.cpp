@@ -1,18 +1,19 @@
 #include "nnet/core/autograd/backward.h"
 
 #include <stdexcept>
-#include <unordered_set>
 #include <vector>
 
 namespace nnet {
+    static thread_local std::uint64_t currentPass = 0;
 
     // Adds a value to `order` only after everything it was made from.
     static void collectInOrder(const Value& value, std::vector<ValueState*>& order,
-                               std::unordered_set<ValueState*>& visited) {
-        if (!visited.insert(value.get()).second) return;
+                               std::uint64_t pass) {
+        if (value->visitedPass == pass) return;
+        value->visitedPass = pass;
         if (value->madeBy) {
             for (const Value& input : value->madeBy->inputs) {
-                collectInOrder(input, order, visited);
+                collectInOrder(input, order, pass);
             }
         }
         order.push_back(value.get());
@@ -29,8 +30,7 @@ namespace nnet {
         }
 
         std::vector<ValueState*> order;
-        std::unordered_set<ValueState*> visited;
-        collectInOrder(output, order, visited);
+        collectInOrder(output, order, ++currentPass);
 
         // Refuse a used graph before touching anything, so a rejected call
         // leaves every gradient exactly as it was.
@@ -55,7 +55,7 @@ namespace nnet {
         // would carry this gradient forward and deposit it a second time.
         for (ValueState* value : order) {
             if (value->accumulateInto) {
-                *value->accumulateInto = *value->accumulateInto + value->grad;
+                *value->accumulateInto += value->grad;
                 value->grad = zeros(value->grad.shape());
             }
         }

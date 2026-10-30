@@ -18,6 +18,7 @@ namespace nnet {
 
         // for storing the parameters gradients within the model, so we can update them with an optimizer
         Tensor* accumulateInto = nullptr;
+        std::uint64_t visitedPass = 0;
 
     };
 
