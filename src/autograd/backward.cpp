@@ -1,5 +1,6 @@
 #include "nnet/core/autograd/backward.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -56,7 +57,8 @@ namespace nnet {
         for (ValueState* value : order) {
             if (value->accumulateInto) {
                 *value->accumulateInto += value->grad;
-                value->grad = zeros(value->grad.shape());
+                double* grad = value->grad.data();
+                std::fill(grad, grad + value->grad.numel(), 0.0);
             }
         }
 
