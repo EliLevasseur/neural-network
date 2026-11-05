@@ -1,0 +1,55 @@
+diff --git a/include/nnet/core/autograd/backward.h b/include/nnet/core/autograd/backward.h
+index 8bde21a..1d0c95c 100644
+--- a/include/nnet/core/autograd/backward.h
++++ b/include/nnet/core/autograd/backward.h
+@@ -4,6 +4,8 @@
+ #include "value.h"
+ 
+ namespace nnet {
++    // Calls sharing Values or Parameters must not overlap. Serial handoff
++    // between threads is allowed after synchronizing (for example, join()).
+     // Starts from a gradient of ones, which is right when `loss` is the
+     // number being minimised.
+     void backward(const Value& loss);
+@@ -14,4 +16,4 @@ namespace nnet {
+     void backward(const Value& output, const Tensor& gradientOfOutput);
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/src/autograd/backward.cpp b/src/autograd/backward.cpp
+index 3ada6b1..40c5a53 100644
+--- a/src/autograd/backward.cpp
++++ b/src/autograd/backward.cpp
+@@ -1,10 +1,13 @@
+ #include "nnet/core/autograd/backward.h"
+ 
++#include <atomic>
+ #include <stdexcept>
+ #include <vector>
+ 
+ namespace nnet {
+-    static thread_local std::uint64_t currentPass = 0;
++    // A later backward may run on a different thread after the first joins.
++    // The IDs must still be unique; this does not synchronize shared gradients.
++    static std::atomic<std::uint64_t> currentPass{0};
+ 
+     // Adds a value to `order` only after everything it was made from.
+     static void collectInOrder(const Value& value, std::vector<ValueState*>& order,
+@@ -30,7 +33,7 @@ namespace nnet {
+         }
+ 
+         std::vector<ValueState*> order;
+-        collectInOrder(output, order, ++currentPass);
++        collectInOrder(output, order, currentPass.fetch_add(1, std::memory_order_relaxed) + 1);
+ 
+         // Refuse a used graph before touching anything, so a rejected call
+         // leaves every gradient exactly as it was.
+@@ -77,4 +80,4 @@ namespace nnet {
+             record->inputs.clear();
+         }
+     }
+-}
+\ No newline at end of file
++}

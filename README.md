@@ -16,52 +16,6 @@ The second is the actual framework, built around a `Tensor` type. It has compone
 optimizers, and automatic differentiation, so a model can be trained without writing its backward
 pass by hand.
 
-## Recognizing handwritten digits
-
-The framework can train a network on MNIST, the standard set of 28x28
-handwritten digits. I train on 50,000 of the training images, keep the other
-10,000 aside as a validation set to watch during training, and only score the
-10,000 test images once, at the very end. A network with one hidden layer of
-128 units (784 -> 128 -> 10, ReLU, softmax cross-entropy, mini-batches of 64)
-gets 97.07% of the test images right after 10 passes over the training set.
-Each pass takes about 6.5 seconds on one core of a Ryzen 9 9950X.
-
-```bash
-make mnist-data   # downloads MNIST into data/mnist/ and checks its checksums
-make mnist        # trains the network and tests it
-```
-
-Everything is seeded, so apart from the timings it prints the same numbers
-every time I run it:
-
-```text
-Before training: validation accuracy 10.52% (guessing)
-Epoch  1 | training loss 0.3799 | validation accuracy 92.48% | 6.4 s
-Epoch  2 | training loss 0.2064 | validation accuracy 94.55% | 6.4 s
-...
-Epoch 10 | training loss 0.0609 | validation accuracy 97.12% | 6.2 s
-
-Final test accuracy: 97.07% (9707 of 10000 images it never trained on)
-```
-
-At the end it draws some test images in the terminal with its guess, how sure
-it was, and the right answer, plus a few of the ones it gets wrong:
-
-```text
-        .--:.
-        +#*#%@%%%%%%%%%-
-              . ....:@@:
-                   :@@:
-                  -@%.
-                 :@%.
-                +@#.
-               %@+
-             -@@-
-            -@@@.
-            :==
-  guess 7 (99.9%) true 7
-```
-
 ## Where things stand
 
 Both examples split a validation set off their training data, watch it during
@@ -73,7 +27,7 @@ with the reference model.
 
 ```text
 make test-reference   36 checks   the old MLP on its own, no tensor code linked
-make test-tensor     225 checks   Tensor, operations, layers, autograd, training, MNIST loading, checkpoints
+make test-tensor     229 checks   Tensor, operations, layers, autograd, training, MNIST loading, checkpoints
 make test-parity     104 checks   the framework compared against the old MLP
 ```
 
@@ -99,7 +53,7 @@ ctest --preset debug
 ```
 
 CMake builds reusable libraries and separate examples/tests. CTest runs all four
-suites, including the optimizer checks: 411 checks in total. The reference
+suites, including the optimizer checks: 415 checks in total. The reference
 executable remains independent of Tensor/autograd.
 
 Use `checked`, `release`, or `asan` in place of `debug` for checked libstdc++,
@@ -276,9 +230,23 @@ only 32767, so that model's starting weights would be much coarser on Windows.
 The loss graph (`make graph`) needs matplotlib and a desktop session. It works
 on macOS out of the box and on Linux with a display (WSLg under WSL).
 
+## Performance measurements
+
+Run a comparison against `main` (or another commit):
+
+```bash
+CXX=g++ ./scripts/benchmarks.sh main -t "Optimization branch" -m "My PC / Fedora WSL"
+```
+
+Each successful run appends a dated machine entry under that test title in
+[the performance log](info/PERFORMANCE.md), retaining raw samples and source
+evidence in `info/benchmark-runs/`. Python 3 is required for report validation.
+The November 5 comparison improved dense-layer multiplication and small-MLP
+training, but regressed the 100×100 case; see the log for measured tradeoffs.
+
 ## What's next
 
-- Measuring where the training time actually goes, then making it faster.
+- Use the recorded CPU measurements to guide future performance work.
 - More layer types and losses than the ones I have so far.
 
 Longer term, I want this to be a core that can support quite different kinds of

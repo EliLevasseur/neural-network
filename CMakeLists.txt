@@ -6,6 +6,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 option(NNET_BUILD_EXAMPLES "Build the reference, Tensor MLP and MNIST examples" ON)
+option(NNET_BUILD_CONNECT4 "Build the separately supplied local Connect4 example" OFF)
 option(NNET_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(NNET_ENABLE_GLIBCXX_DEBUG "Enable checked libstdc++ containers (changes ABI)" OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compiler commands for editors")
@@ -102,6 +103,17 @@ if(NNET_BUILD_EXAMPLES)
     nnet_configure_target(mnist)
     target_link_libraries(mnist PRIVATE nnet_framework nnet_data)
 
+endif()
+
+if(NNET_BUILD_CONNECT4)
+    foreach(source IN ITEMS main.cpp simulations.cpp connect_four.cpp connect_four.h)
+        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/connect4/${source}")
+            message(FATAL_ERROR
+                "NNET_BUILD_CONNECT4 needs the separate examples/connect4 sources (${source} is missing). "
+                "Leave NNET_BUILD_CONNECT4=OFF to build the framework.")
+        endif()
+    endforeach()
+
     add_executable(connect4
         examples/connect4/main.cpp
         examples/connect4/connect_four.cpp)
@@ -116,6 +128,7 @@ if(NNET_BUILD_EXAMPLES)
 endif()
 
 if(BUILD_TESTING)
+    find_package(Threads REQUIRED)
     add_executable(reference_tests
         tests/reference_test_main.cpp tests/network_test.cpp tests/training_test.cpp)
     target_link_libraries(reference_tests PRIVATE nnet_reference)
@@ -124,7 +137,7 @@ if(BUILD_TESTING)
         tests/tensor_test_main.cpp tests/tensor_test.cpp tests/dataframe_test.cpp
         tests/tensor_ops_tests.cpp tests/dense_test.cpp tests/autograd_test.cpp
         tests/trainer_test.cpp tests/mnist_test.cpp)
-    target_link_libraries(tensor_tests PRIVATE nnet_framework nnet_data)
+    target_link_libraries(tensor_tests PRIVATE nnet_framework nnet_data Threads::Threads)
 
     add_executable(parity_tests tests/parity_test_main.cpp tests/parity_test.cpp)
     target_link_libraries(parity_tests PRIVATE nnet_reference nnet_framework)

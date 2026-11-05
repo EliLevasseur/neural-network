@@ -13,8 +13,8 @@ ctest --preset debug
 ```
 
 CMake configures targets, the build command compiles/links them, and CTest runs
-the existing test programs. Four CTest entries contain 411 individual checks:
-reference (36), Tensor/framework (225), parity (104), and optimizer (46).
+the existing test programs. Four CTest entries contain 415 individual checks:
+reference (36), Tensor/framework (229), parity (104), and optimizer (46).
 
 | Preset | Purpose | Directory |
 |---|---|---|
@@ -82,6 +82,18 @@ make mnist-data
 Downloading MNIST remains an explicit existing Make target. Configuring,
 compiling, and testing never download or train on the full dataset.
 The original Makefile and its commands still work independently.
+
+Connect4 lives in a separate local repository under `examples/connect4/`; it
+is not supplied by a framework checkout. Its optional targets default to off.
+If those sources are present locally, enable and build them explicitly:
+
+```bash
+cmake --preset release -DNNET_BUILD_CONNECT4=ON
+cmake --build --preset release --target connect4 connect4_simulations
+```
+
+Use `-DNNET_BUILD_CONNECT4=OFF` to turn them off again. The three framework
+examples above remain controlled by `NNET_BUILD_EXAMPLES`.
 
 ## Install and use from another project
 

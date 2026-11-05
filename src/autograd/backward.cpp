@@ -1,10 +1,13 @@
 #include "nnet/core/autograd/backward.h"
 
+#include <atomic>
 #include <stdexcept>
 #include <vector>
 
 namespace nnet {
-    static thread_local std::uint64_t currentPass = 0;
+    // A later backward may run on a different thread after the first joins.
+    // The IDs must still be unique; this does not synchronize shared gradients.
+    static std::atomic<std::uint64_t> currentPass{0};
 
     // Adds a value to `order` only after everything it was made from.
     static void collectInOrder(const Value& value, std::vector<ValueState*>& order,
@@ -30,7 +33,7 @@ namespace nnet {
         }
 
         std::vector<ValueState*> order;
-        collectInOrder(output, order, ++currentPass);
+        collectInOrder(output, order, currentPass.fetch_add(1, std::memory_order_relaxed) + 1);
 
         // Refuse a used graph before touching anything, so a rejected call
         // leaves every gradient exactly as it was.

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <functional>
 #include <stdexcept>
+#include <thread>
 
 // Every check here compares the gradient autograd produces against a central
 // finite difference: nudge one input number up and down, and measure how far
@@ -279,6 +280,35 @@ void runAutogradTests(TestRunner& tests) {
             doubled = doubled && std::abs(afterSecond[i] - 2.0 * afterFirst[i]) < 1.0e-12;
         }
         tests.expectTrue(doubled, "a new graph over the same leaf adds its own contribution");
+    }
+
+    // Threads run one at a time: this tests handoff, not parallel backward.
+    {
+        nnet::Tensor persistent = nnet::zeros({1});
+        nnet::Value x = nnet::makeLeaf(nnet::Tensor({1}, {2}));
+        x->accumulateInto = &persistent;
+        const nnet::Value first = nnet::add(x, x);
+        std::thread firstThread([&] { nnet::backward(first); });
+        firstThread.join();
+        tests.expectNear(persistent.at({0}), 2.0, 1.0e-12,
+            "first thread deposits both contributions");
+
+        persistent = nnet::zeros({1});
+        std::thread secondThread([&] { nnet::backward(nnet::add(x, x)); });
+        secondThread.join();
+        tests.expectNear(persistent.at({0}), 2.0, 1.0e-12,
+            "a fresh graph on another thread still visits a reused leaf");
+
+        bool rejected = false;
+        std::thread thirdThread([&] {
+            try { nnet::backward(first); }
+            catch (const std::logic_error&) { rejected = true; }
+        });
+        thirdThread.join();
+        tests.expectTrue(rejected,
+            "a consumed graph is refused even on another thread");
+        tests.expectNear(persistent.at({0}), 2.0, 1.0e-12,
+            "refused backward on another thread leaves gradients unchanged");
     }
 
     // ---- backward from a supplied gradient ------------------------------------

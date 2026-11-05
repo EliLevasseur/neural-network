@@ -4,6 +4,8 @@
 #include "value.h"
 
 namespace nnet {
+    // Calls sharing Values or Parameters must not overlap. Serial handoff
+    // between threads is allowed after synchronizing (for example, join()).
     // Starts from a gradient of ones, which is right when `loss` is the
     // number being minimised.
     void backward(const Value& loss);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Compares two versions of nnet and prints an entry for info/PERFORMANCE.md.
+# Compares two versions of nnet and appends a run to info/PERFORMANCE.md.
 #
 # Both versions are built with the same compiler and flags, and run the same
 # benchmark program (benchmarks/bench_suite.cpp from your current files), so
@@ -9,7 +9,7 @@
 # both sides are affected equally.
 #
 # Usage:
-#   scripts/benchmark.sh <before> [after] [options]
+#   scripts/benchmarks.sh <before> [after] [options]
 #
 #   before   commit, branch or tag to compare against: HEAD, HEAD~1, fef6a15, main
 #   after    commit to compare it with. Leave it out to use your files as they
@@ -23,12 +23,14 @@
 #
 # Examples:
 #   # you just made a change and haven't committed it: compare against HEAD
-#   scripts/benchmark.sh HEAD -t "std::fill for gradient resets"
+#   scripts/benchmarks.sh HEAD -t "std::fill for gradient resets"
 #
 #   # redo an old comparison between two commits
-#   scripts/benchmark.sh fef6a15 b7eff87 -t "i-k-j matrix multiplication"
+#   scripts/benchmarks.sh fef6a15 b7eff87 -t "i-k-j matrix multiplication"
 #
-# The entry is printed and also saved to build/benchmark-entry.md.
+# The same title groups runs from different machines under one test section.
+# Raw samples and source evidence stay in info/benchmark-runs/ (also on failure).
+# Requires Python 3 for validation and updating the Markdown log.
 # Set CXX to choose the compiler (default: clang++ if installed, else c++).
 
 set -euo pipefail
@@ -49,6 +51,10 @@ after_ref=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        -t|-m|-r|-n)
+            if [ $# -lt 2 ]; then echo "Missing value for $1" >&2; exit 1; fi ;;
+    esac
+    case "$1" in
         -t) title="$2"; shift 2 ;;
         -m) machine_label="$2"; shift 2 ;;
         -r) rounds="$2"; shift 2 ;;
@@ -65,10 +71,22 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$before_ref" ]; then
-    echo "Say which commit to compare against, e.g.: scripts/benchmark.sh HEAD" >&2
+    echo "Say which commit to compare against, e.g.: scripts/benchmarks.sh HEAD" >&2
     echo >&2
     usage 1
 fi
+
+for count in "$rounds" "$repeats"; do
+    if ! [[ "$count" =~ ^[1-9][0-9]*$ ]] || [ "${#count}" -gt 6 ]; then
+        echo "Rounds and repeats must be positive integers (at most six digits)." >&2
+        exit 1
+    fi
+done
+if [ -z "$title" ] || [[ "$title" == *$'\n'* || "$title" == *$'\r'* ]]; then
+    echo "The test title must be one nonempty line." >&2
+    exit 1
+fi
+command -v python3 > /dev/null || { echo "Python 3 is required." >&2; exit 1; }
 
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
@@ -88,15 +106,32 @@ done
 if [ -z "${CXX:-}" ]; then
     if command -v clang++ > /dev/null 2>&1; then CXX=clang++; else CXX=c++; fi
 fi
-flags="-std=c++17 -O2 -DNDEBUG"
+flags="-std=c++17 -O2 -DNDEBUG -Wall -Wextra -Wpedantic"
+
+mkdir -p "$repo/info/benchmark-runs"
+results=$(mktemp -d "$repo/info/benchmark-runs/$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
+run_id=$(basename "$results")
+cp "$suite" "$results/suite.cpp"
+suite="$results/suite.cpp"
+git diff --binary HEAD -- src include > "$results/source.patch"
+git ls-files --others --exclude-standard -- src include > "$results/untracked-sources.txt"
+if [ -s "$results/untracked-sources.txt" ]; then
+    echo "Untracked library sources cannot be reproduced by source.patch; record them before benchmarking." >&2
+    exit 1
+fi
+{
+    printf 'Before commit: %s\n' "$(git rev-parse "$before_ref^{commit}")"
+    printf 'After commit: %s\n' "$(git rev-parse "${after_ref:-HEAD}^{commit}")"
+    printf 'After uses live files: %s\n' "$([ -z "$after_ref" ] && echo yes || echo no)"
+    printf 'Suite Git blob hash: %s\n' "$(git hash-object "$suite")"
+    printf 'Compiler: %s\nFlags: %s\nRounds: %s\nRepeats: %s\n' "$CXX" "$flags" "$rounds" "$repeats"
+    printf 'Source patch applies to HEAD only when after uses live files.\n'
+} > "$results/metadata.txt"
+echo "Raw evidence: $results" >&2
+echo "incomplete" > "$results/status.txt"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/nnet-bench.XXXXXX")
-worktrees=""
 cleanup() {
-    for tree in $worktrees; do
-        git -C "$repo" worktree remove --force "$tree" > /dev/null 2>&1 || true
-    done
-    git -C "$repo" worktree prune > /dev/null 2>&1 || true
     rm -rf "$work"
 }
 trap cleanup EXIT
@@ -128,8 +163,8 @@ build_side() {
         dir="$repo"
     else
         dir="$work/$side"
-        git worktree add --detach --quiet "$dir" "$ref"
-        worktrees="$worktrees $dir"
+        mkdir -p "$dir"
+        git archive "$ref" | tar -x -C "$dir"
     fi
 
     local sources=()
@@ -142,10 +177,10 @@ build_side() {
     echo "Building $side: $(describe "$ref")" >&2
     # shellcheck disable=SC2086  # $flags is meant to split into several flags
     if ! "$CXX" $flags -I"$dir/include" "$suite" "${sources[@]}" -o "$work/bench_$side" \
-            > "$work/build_$side.log" 2>&1; then
+            > "$results/build_$side.log" 2>&1; then
         echo >&2
         echo "Building the $side version failed:" >&2
-        tail -n 20 "$work/build_$side.log" >&2
+        tail -n 20 "$results/build_$side.log" >&2
         echo >&2
         echo "If this is an old commit, bench_suite.cpp may use something it doesn't have yet." >&2
         exit 1
@@ -156,7 +191,7 @@ if [ -z "$after_ref" ] && [ -z "$(git status --porcelain --untracked-files=no --
    [ "$(git rev-parse "$before_ref^{commit}")" = "$(git rev-parse HEAD)" ]; then
     echo "Note: you have no uncommitted changes in src/ or include/, so before and after" >&2
     echo "are the same code. Expect \"same\" or \"within noise\" everywhere." >&2
-    echo "To compare your last commit with the one before it: scripts/benchmark.sh HEAD~1 HEAD" >&2
+    echo "To compare your last commit with the one before it: scripts/benchmarks.sh HEAD~1 HEAD" >&2
     echo >&2
 fi
 
@@ -165,22 +200,23 @@ build_side after "$after_ref"
 
 # ---------------------------------------------------------------- running
 
-: > "$work/before.txt"
-: > "$work/after.txt"
+: > "$results/before.txt"
+: > "$results/after.txt"
 round=1
 while [ "$round" -le "$rounds" ]; do
     # Swap the order every round, so neither side always goes first.
     if [ $((round % 2)) -eq 1 ]; then order="before after"; else order="after before"; fi
     for side in $order; do
         echo "Round $round/$rounds: running $side..." >&2
-        "$work/bench_$side" "$repeats" >> "$work/$side.txt"
+        printf '%s %s\n' "$round" "$side" >> "$results/order.txt"
+        "$work/bench_$side" "$repeats" >> "$results/$side.txt" 2>> "$results/$side-errors.log"
     done
     round=$((round + 1))
 done
 
 # "median min max" of one measurement across all rounds of one side.
 stats() {
-    awk -v key="$2" '$1 == key { print $2 }' "$work/$1.txt" | sort -g | awk '
+    awk -v key="$2" '$1 == key { print $2 }' "$results/$1.txt" | sort -g | awk '
         BEGIN { OFMT = "%.12g"; CONVFMT = "%.12g" }
         { values[NR] = $1 }
         END {
@@ -280,24 +316,13 @@ esac
 : "${cpu:=unknown}"
 compiler=$("$CXX" --version 2>/dev/null | head -n 1)
 if [ -z "$machine_label" ]; then machine_label="Machine 1: $os_label"; fi
+machine_label=$(printf '%s' "$machine_label" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+printf 'CPU: %s\nCores: %s\nRAM: %s\nOS: %s\nKernel: %s\nCompiler version: %s\n' \
+    "$cpu" "$cores" "$ram" "$os_version" "$(uname -sr)" "$compiler" >> "$results/metadata.txt"
 
 # ---------------------------------------------------------------- checks
 
-checks=""
-for side in before after; do
-    error=$(stats "$side" matmul100_max_error | awk '{ print $1 }')
-    if awk -v e="$error" 'BEGIN { exit !(e > 1e-9) }'; then
-        checks="$checks
-- **Warning:** the $side version's \`operator*\` gives wrong answers (max error $error)."
-    fi
-done
-# Only shown when something is wrong; a passing check adds nothing to the entry.
-lb=$(stats before mlp_small_loss | awk '{ print $1 }')
-la=$(stats after mlp_small_loss | awk '{ print $1 }')
-if ! awk -v b="$lb" -v a="$la" 'BEGIN { d = b - a; if (d < 0) d = -d; s = b < 0 ? -b : b; exit !(d <= 1e-9 * (s > 1 ? s : 1)) }'; then
-    checks="$checks
-- **Note:** the training loss changed ($lb before, $la after), so this change affects the results, not just the speed."
-fi
+python3 "$repo/scripts/benchmark_report.py" validate "$results" "$rounds" "$repeats"
 
 # ---------------------------------------------------------------- entry
 
@@ -309,7 +334,7 @@ table=$(
     row matmul_layer_ms "Matmul 64×784 · 784×128, one multiply (ms)" time
     row matmul_layer_gflops "Matmul 64×784 · 784×128 throughput (GFLOP/s)" rate
     row matmul100_allocs "Matmul 100×100, allocations per multiply" count
-    row matmul100_kb "Matmul 100×100, memory allocated per multiply (KB)" count
+    row matmul100_kb "Matmul 100×100, memory allocated per multiply (KiB)" count
     row mlp_small_epoch_ms "Small MLP (tensor_mlp network), one epoch (ms)" time
     row mlp_small_allocs_per_step "Small MLP, allocations per training step" count
     echo "BEST|$best_label|$best_ratio|$noise_any"
@@ -327,7 +352,7 @@ if [ -n "$best_label" ]; then
         else printf "**%.2f× slower**: %s", 1 / r, l
     }')
 else
-    headline="**No measurable speed change** in any benchmark."
+    headline="**No non-overlapping timing improvement or regression observed.**"
 fi
 
 noise_note=""
@@ -336,42 +361,40 @@ if [ "$noise_any" = "1" ]; then
   \"Within noise\" means the before and after runs overlapped, so that difference may not be real."
 fi
 
-# Written straight to the file: a here-document inside $( ) trips up the old
-# bash 3.2 that macOS ships.
-mkdir -p "$repo/build"
-entry_file="$repo/build/benchmark-entry.md"
+# Keep the report fragment with its evidence, then insert beneath its test title.
+entry_file="$results/entry.md"
 cat > "$entry_file" <<EOF
 <details>
-<summary><b>$(date +%Y-%m-%d): $title</b></summary>
-<br>
+<summary><b>$machine_label — $(date -u '+%Y-%m-%d %H:%M:%S UTC')</b></summary>
 
-  <details>
-  <summary><b>$machine_label</b></summary>
-
-  ### Benchmark Setup
+### Setup
 
 - CPU: $cpu
 - Cores: $cores
 - RAM: $ram
 - OS: $os_version
+- Kernel: $(uname -sr)
 - Compiler: $compiler, \`$flags\`
 - Before: $(describe "$before_ref")
 - After: $(describe "$after_ref")
-- Each number is the median of $rounds runs, each the median of $repeats repeats. Before and after runs alternate.$checks
+- Timing numbers are medians of $rounds rounds, each the median of $repeats repeats, with one untimed warmup per case. Run order alternates.
+- Both matrix shapes pass the plain dot-product reference (absolute tolerance 1e-9). First-epoch loss and all 87 trained MLP parameters match across versions (absolute/relative tolerance 1e-9).
+- No CPU affinity or power controls applied; results describe this machine and workload only.
+- Evidence: [before samples](benchmark-runs/$run_id/before.txt), [after samples](benchmark-runs/$run_id/after.txt), [metadata](benchmark-runs/$run_id/metadata.txt), [suite source](benchmark-runs/$run_id/suite.cpp), [uncommitted library patch](benchmark-runs/$run_id/source.patch).
 
-  ### Performance Metrics
+### Results
 
   $headline
 
 $table
 $noise_note
 
-  </details>
-
 </details>
 EOF
 
+python3 "$repo/scripts/benchmark_report.py" append "$repo/info/PERFORMANCE.md" "$title" "$entry_file"
+echo "passed; appended to info/PERFORMANCE.md" > "$results/status.txt"
 echo >&2
-echo "Saved to build/benchmark-entry.md" >&2
+echo "Appended under '$title' in info/PERFORMANCE.md" >&2
 echo >&2
 cat "$entry_file"

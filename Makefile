@@ -85,7 +85,7 @@ $(REFERENCE_TEST_BINARY): $(REFERENCE_TEST_SOURCES) tests/test_utils.h $(NETWORK
 # Tensor compilation unit, independently of the Network/Trainer reference path.
 $(TENSOR_TEST_BINARY): $(TENSOR_TEST_SOURCES) tests/test_utils.h $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) $(HEADERS)
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) -Itests $(TENSOR_TEST_SOURCES) $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) -o $(TENSOR_TEST_BINARY)
+	$(CXX) $(CXXFLAGS) -pthread -Itests $(TENSOR_TEST_SOURCES) $(DATAFRAME_SOURCE) $(TENSOR_SOURCES) -o $(TENSOR_TEST_BINARY)
 
 # Parity tests intentionally link both worlds: the legacy Network/Trainer
 # oracle and the Tensor operations. This is the only target that does so;

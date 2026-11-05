@@ -1,0 +1,15 @@
+Before commit: fef6a15ad67f88f17d7892512df3b54873896aac
+After commit: 7d8566b97d7f1d9419d6f420f15752cd09cc4ec5
+After uses live files: yes
+Suite Git blob hash: 9ca9f9626369f51391847d1e15788a172598540c
+Compiler: g++
+Flags: -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Wpedantic
+Rounds: 3
+Repeats: 5
+Source patch applies to HEAD only when after uses live files.
+CPU: AMD Ryzen 9 9950X 16-Core Processor
+Cores: 32 logical
+RAM: 30 GB
+OS: Fedora Linux 44 (WSL)
+Kernel: Linux 6.6.114.1-microsoft-standard-WSL2
+Compiler version: g++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)

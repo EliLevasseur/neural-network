@@ -2,7 +2,7 @@
 //
 // It only uses parts of the library that have existed since the first commit
 // being compared (Tensor, operator*, Dense, Sequential, trainEpoch, SGD), so
-// scripts/benchmark.sh can build this same file against an old commit and a
+// scripts/benchmarks.sh can build this same file against an old commit and a
 // new one and compare them. If you add a benchmark that needs a newer
 // function, older commits won't compile it.
 //
@@ -18,6 +18,7 @@
 #include <memory>
 #include <new>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 #include "nnet/core/tensor.h"
@@ -30,11 +31,9 @@
 
 using nnet::Tensor;
 
-// ---------------------------------------------------------------------------
 // Allocation counting. Every heap allocation in the program goes through
 // operator new, so replacing it counts them all. Read the counters before and
 // after the code being measured and subtract.
-// ---------------------------------------------------------------------------
 
 static std::size_t allocationCount = 0;
 static std::size_t allocatedBytes = 0;
@@ -78,18 +77,29 @@ double timeMs(Function&& function) {
 
 // One untimed warm-up, then the median of `repeats` timed runs.
 template <typename Function>
-double medianMs(int repeats, Function&& function) {
+double medianMs(const char* name, int repeats, Function&& function) {
     function();
     std::vector<double> times;
     for (int i = 0; i < repeats; i++) {
         times.push_back(timeMs(function));
     }
+    // Keep every measured sample in execution order, outside the timed code.
+    for (double ms : times) {
+        if (!std::isfinite(ms) || ms <= 0.0) {
+            throw std::runtime_error("invalid benchmark duration");
+        }
+        std::printf("sample_%s %.17g\n", name, ms);
+    }
     std::sort(times.begin(), times.end());
-    return times[times.size() / 2];
+    const std::size_t middle = times.size() / 2;
+    return times.size() % 2 ? times[middle] : (times[middle - 1] + times[middle]) / 2.0;
 }
 
 static void report(const char* name, double value) {
-    std::printf("%s %.6g\n", name, value);
+    if (!std::isfinite(value)) {
+        throw std::runtime_error("non-finite benchmark result");
+    }
+    std::printf("%s %.17g\n", name, value);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +151,12 @@ static double maxErrorAgainstReference(const Tensor& left, const Tensor& right, 
             for (std::size_t k = 0; k < inner; k++) {
                 total += a[i * inner + k] * b[k * cols + j];
             }
-            worst = std::max(worst, std::abs(total - c[i * cols + j]));
+            const double error = std::abs(total - c[i * cols + j]);
+            if (!std::isfinite(total) || !std::isfinite(c[i * cols + j]) ||
+                !std::isfinite(error) || error > 1.0e-9) {
+                throw std::runtime_error("matmul disagrees with the finite reference (tolerance 1e-9)");
+            }
+            worst = std::max(worst, error);
         }
     }
     return worst;
@@ -161,7 +176,7 @@ static void matmulSquare(int repeats) {
 
     report("matmul100_max_error", maxErrorAgainstReference(a, b, a * b));
 
-    const double ms = medianMs(repeats, [&] {
+    const double ms = medianMs("matmul100_ms", repeats, [&] {
         for (int i = 0; i < multiplies; i++) {
             sink = sink + (a * b).getData()[0];
         }
@@ -187,7 +202,8 @@ static void matmulLayer(int repeats) {
     const Tensor w = randomTensor({784, 128}, generator, -0.1, 0.1);
     const int multiplies = 20;
 
-    const double ms = medianMs(repeats, [&] {
+    report("matmul_layer_max_error", maxErrorAgainstReference(x, w, x * w));
+    const double ms = medianMs("matmul_layer_20_ms", repeats, [&] {
         for (int i = 0; i < multiplies; i++) {
             sink = sink + (x * w).getData()[0];
         }
@@ -212,8 +228,12 @@ static void trainingBenchmark(const char* name, nnet::Sequential& model, const T
     // The first epoch's loss, from a fixed starting point, is the
     // correctness check. Every later epoch starts from different weights.
     const double firstLoss = nnet::trainEpoch(model, inputs, targets, batchSize, optimizer, loss, shuffle);
+    char key[64];
+    std::snprintf(key, sizeof(key), "%s_loss", name);
+    report(key, firstLoss);
 
-    const double epochMs = medianMs(repeats, [&] {
+    std::snprintf(key, sizeof(key), "%s_epoch_ms", name);
+    const double epochMs = medianMs(key, repeats, [&] {
         sink = sink + nnet::trainEpoch(model, inputs, targets, batchSize, optimizer, loss, shuffle);
     });
 
@@ -221,15 +241,23 @@ static void trainingBenchmark(const char* name, nnet::Sequential& model, const T
     sink = sink + nnet::trainEpoch(model, inputs, targets, batchSize, optimizer, loss, shuffle);
     const double allocations = static_cast<double>(allocationCount - countBefore);
 
-    char key[64];
     std::snprintf(key, sizeof(key), "%s_epoch_ms", name);
     report(key, epochMs);
     std::snprintf(key, sizeof(key), "%s_step_ms", name);
     report(key, epochMs / steps);
     std::snprintf(key, sizeof(key), "%s_allocs_per_step", name);
     report(key, allocations / steps);
-    std::snprintf(key, sizeof(key), "%s_loss", name);
-    std::printf("%s %.12g\n", key, firstLoss);
+    if (!std::isfinite(sink)) {
+        throw std::runtime_error("non-finite value during timed training");
+    }
+    // Compare the trained state too, not only the first epoch's loss.
+    std::size_t index = 0;
+    for (const auto* parameter : model.parameters()) {
+        for (double value : parameter->value.getData()) {
+            std::snprintf(key, sizeof(key), "check_mlp_parameter_%zu", index++);
+            report(key, value);
+        }
+    }
 }
 
 // The tensor_mlp example's network: 8 -> 6 -> 4 -> 1 with sigmoids, one row
@@ -252,9 +280,14 @@ static void smallNetwork(int repeats) {
 }
 
 int main(int argc, char** argv) {
-    const int repeats = argc > 1 ? std::max(1, std::atoi(argv[1])) : 5;
-    matmulSquare(repeats);
-    matmulLayer(repeats);
-    smallNetwork(repeats);
-    return 0;
+    try {
+        const int repeats = argc > 1 ? std::max(1, std::atoi(argv[1])) : 5;
+        matmulSquare(repeats);
+        matmulLayer(repeats);
+        smallNetwork(repeats);
+        return 0;
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "Benchmark failed: %s\n", error.what());
+        return 1;
+    }
 }
