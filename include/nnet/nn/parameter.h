@@ -67,8 +67,11 @@ namespace nnet {
 	// pointer is well defined.
 	inline Value leafFor(const Parameter& parameter) {
 		parameter.validateShape();
-		Value leaf = makeLeaf(parameter.value);
-		if (parameter.requiresGrad && gradientRecordingEnabled) {
+		// A frozen parameter, or any parameter under NoGrad, is plain data
+		// for this pass: backward computes no gradient for it.
+		const bool trainable = parameter.requiresGrad && gradientRecordingEnabled;
+		Value leaf = makeLeaf(parameter.value, trainable);
+		if (trainable) {
 			leaf->accumulateInto = const_cast<Tensor*>(&parameter.grad);
 		}
 		return leaf;

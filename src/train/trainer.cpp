@@ -78,8 +78,9 @@ namespace nnet {
             const std::vector<std::size_t> batchRows(order.begin() + batchStart, order.begin() + batchEnd);
 
             model.zeroGrad();
-            const Value prediction = model.forward(makeLeaf(takeRows(inputs, batchRows)));
-            const Value batchLoss = loss(prediction, makeLeaf(takeRows(targets, batchRows)));
+            // false: the batch is data, so backward computes no gradient for it.
+            const Value prediction = model.forward(makeLeaf(takeRows(inputs, batchRows), false));
+            const Value batchLoss = loss(prediction, makeLeaf(takeRows(targets, batchRows), false));
             // weight by row count so a short last batch counts for less
             weightedLossTotal += batchLoss->data.at({0}) * static_cast<double>(batchRows.size());
             backward(batchLoss);

@@ -1,6 +1,5 @@
 #include "nnet/core/autograd/backward.h"
 
-#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -44,21 +43,23 @@ namespace nnet {
 
         output->grad = gradientOfOutput;
 
+        // A value with no gradient got nothing from anything downstream, so
+        // there is nothing to pass on.
         for (auto it = order.rbegin(); it != order.rend(); ++it) {
-            if ((*it)->madeBy) {
-                (*it)->madeBy->sendGradBackward((*it)->grad);
+            ValueState* value = *it;
+            if (value->madeBy && value->grad) {
+                value->madeBy->sendGradBackward(*value->grad, value->data);
             }
         }
 
         // Every gradient is now complete, so leaves standing in for something
-        // persistent hand theirs over. It is a transfer, not a copy: the leaf
-        // resets to zero afterwards. Otherwise a leaf reused by a later graph
-        // would carry this gradient forward and deposit it a second time.
+        // persistent hand theirs over. It is a transfer, not a copy: the leaf's
+        // gradient is emptied afterwards. Otherwise a leaf reused by a later
+        // graph would carry this gradient forward and deposit it a second time.
         for (ValueState* value : order) {
-            if (value->accumulateInto) {
-                *value->accumulateInto += value->grad;
-                double* grad = value->grad.data();
-                std::fill(grad, grad + value->grad.numel(), 0.0);
+            if (value->accumulateInto && value->grad) {
+                *value->accumulateInto += *value->grad;
+                value->grad.reset();
             }
         }
 

@@ -13,9 +13,14 @@ namespace nnet {
             }
             parameter->validateShape();
         }
-	for (auto& parameter : parameters) {
-		if (parameter->requiresGrad) {
-			parameter->value = parameter->value - parameter->grad * learningRate;
+		// Updated in place: no temporary tensors.
+		for (auto& parameter : parameters) {
+			if (parameter->requiresGrad) {
+				double* value = parameter->value.data();
+				const double* grad = parameter->grad.data();
+				for (std::size_t i = 0; i < parameter->value.numel(); i++) {
+					value[i] -= grad[i] * learningRate;
+				}
 			}
 		}
 	}
@@ -40,9 +45,15 @@ namespace nnet {
 			param->validateShape();
 		}
 		for (std::size_t i = 0; i < params_.size(); i++) {
-			if (params_[i]->requiresGrad) {
-				velocities_[i] = (velocities_[i]*beta_) + params_[i]->grad * (1 - beta_);
-				params_[i]->value = params_[i]->value - (velocities_[i] * learningRate_);
+			if (!params_[i]->requiresGrad) {
+				continue;
+			}
+			double* value = params_[i]->value.data();
+			const double* grad = params_[i]->grad.data();
+			double* velocity = velocities_[i].data();
+			for (std::size_t k = 0; k < params_[i]->value.numel(); k++) {
+				velocity[k] = velocity[k] * beta_ + grad[k] * (1 - beta_);
+				value[k] -= velocity[k] * learningRate_;
 			}
 		}
 	}
@@ -69,22 +80,18 @@ namespace nnet {
 			const double velocityCorrection = 1.0 - std::pow(beta1_, static_cast<double>(stepCounts_[i]));
 			const double squaredCorrection = 1.0 - std::pow(beta2_, static_cast<double>(stepCounts_[i]));
 
-			Tensor gradientSquared = params_[i]->grad;
-			gradientSquared.inplaceMultiplication(params_[i]->grad);
-			velocities_[i] = (velocities_[i] * beta1_) + params_[i]->grad * (1 - beta1_);
-			squaredGradientAverages_[i] = (squaredGradientAverages_[i] * beta2_) + gradientSquared * (1 - beta2_);
-
-			// no elementwise sqrt or divide on Tensor yet, so do it per number
-			const std::vector<double>& values = params_[i]->value.getData();
-			const std::vector<double>& velocity = velocities_[i].getData();
-			const std::vector<double>& squaredAverage = squaredGradientAverages_[i].getData();
-			std::vector<double> newValues(values.size());
-			for (std::size_t k = 0; k < values.size(); k++) {
+			// One loop updates both averages and the value, in place.
+			double* value = params_[i]->value.data();
+			const double* grad = params_[i]->grad.data();
+			double* velocity = velocities_[i].data();
+			double* squaredAverage = squaredGradientAverages_[i].data();
+			for (std::size_t k = 0; k < params_[i]->value.numel(); k++) {
+				velocity[k] = velocity[k] * beta1_ + grad[k] * (1 - beta1_);
+				squaredAverage[k] = squaredAverage[k] * beta2_ + (grad[k] * grad[k]) * (1 - beta2_);
 				const double correctedVelocity = velocity[k] / velocityCorrection;
 				const double correctedSquared = squaredAverage[k] / squaredCorrection;
-				newValues[k] = values[k] - learningRate_ * correctedVelocity / (std::sqrt(correctedSquared) + epsilon_);
+				value[k] -= learningRate_ * correctedVelocity / (std::sqrt(correctedSquared) + epsilon_);
 			}
-			params_[i]->value = Tensor(params_[i]->value.shape(), std::move(newValues));
 		}
 	}
 

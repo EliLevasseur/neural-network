@@ -37,7 +37,7 @@ namespace {
             const double numeric =
                 (forward(nnet::Tensor(leaf->data.shape(), plusData)) -
                  forward(nnet::Tensor(leaf->data.shape(), minusData))) / (2.0 * step);
-            const double analytic = leaf->grad.getData()[i];
+            const double analytic = leaf->grad.value().getData()[i];
             // Written this way round so a NaN counts as a mismatch: every
             // comparison with NaN is false, so `NaN > 1.0e-7` would pass.
             if (!(std::abs(numeric - analytic) <= 1.0e-7)) {
@@ -124,7 +124,7 @@ void runAutogradTests(TestRunner& tests) {
         expectGradientMatches(tests, prediction,
             [&](const nnet::Tensor& t) { return nnet::binaryCrossEntropy(t, target); },
             "loss gradient for the prediction matches a finite difference");
-        tests.expectTrue(targetLeaf->grad.getData() == std::vector<double>{0.0, 0.0},
+        tests.expectTrue(!targetLeaf->grad.has_value(),
             "the target receives no gradient");
     }
 
@@ -286,7 +286,7 @@ void runAutogradTests(TestRunner& tests) {
         nnet::Value x = nnet::makeLeaf(nnet::Tensor({3}, {-1, 0, 2}));
         nnet::backward(nnet::sigmoid(x), nnet::Tensor({3}, {1, 2, 3}));
         const nnet::Tensor derivative = nnet::sigmoidDerivitive(x->data);
-        tests.expectNear(x->grad.at({2}), 3.0 * derivative.at({2}), 1.0e-12,
+        tests.expectNear(x->grad.value().at({2}), 3.0 * derivative.at({2}), 1.0e-12,
             "backward can start from a supplied gradient instead of ones");
 
         bool rejected = false;

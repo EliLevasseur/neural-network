@@ -20,29 +20,29 @@ Value binaryCrossEntropy(const Value& prediction, const Value& target);
 Value softmaxCrossEntropy(const Value& scores, const Value& target);
 
 struct AddRecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 struct matmulRecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override ;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 struct SigmoidRecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 
 struct ReLURecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 
 struct BiasAddRecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 
 struct LossRecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 
 struct SoftmaxCrossEntropyRecord : OperationRecord {
-    void sendGradBackward(const Tensor& gradientOfOutput) override;
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 
 }

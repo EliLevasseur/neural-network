@@ -6,50 +6,87 @@ namespace nnet {
     // Each one runs only during backward. It receives the gradient of its own
     // output, and adds a share into each input's gradient.
 
-    void SigmoidRecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        Tensor contribution = gradientOfOutput;
-        contribution.inplaceMultiplication(sigmoidDerivitive(inputs[0]->data));
-        inputs[0]->grad = inputs[0]->grad + contribution;
+    // Sigmoid's slope is s * (1 - s), where s is its own output, so it reads
+    // the output instead of recomputing exp. One loop, no temporary tensors.
+    // The brackets match the old order of operations, so results are identical.
+    void SigmoidRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) {
+        if (!inputs[0]->requiresGrad) {
+            return;
+        }
+        double* grad = gradToAddInto(*inputs[0]).data();
+        const double* upstream = gradientOfOutput.data();
+        const double* s = output.data();
+        for (std::size_t i = 0; i < output.numel(); i++) {
+            grad[i] += upstream[i] * (s[i] * (1.0 - s[i]));
+        }
     }
 
-    void ReLURecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        Tensor contribution = gradientOfOutput;
-        contribution.inplaceMultiplication(reluDerivitive(inputs[0]->data));
-        inputs[0]->grad = inputs[0]->grad + contribution;
+    // ReLU passes the gradient through where its input was positive.
+    void ReLURecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (!inputs[0]->requiresGrad) {
+            return;
+        }
+        double* grad = gradToAddInto(*inputs[0]).data();
+        const double* upstream = gradientOfOutput.data();
+        const double* x = inputs[0]->data.data();
+        for (std::size_t i = 0; i < gradientOfOutput.numel(); i++) {
+            if (x[i] > 0.0) {
+                grad[i] += upstream[i];
+            }
+        }
     }
 
-    void matmulRecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        // one gradient for each input
-        inputs[0]->grad += matmulGradInput(gradientOfOutput, inputs[1]->data);
+    // Each gradient is computed only if that input needs one. For the first
+    // layer this skips the input's gradient, a whole matmul nothing reads.
+    void matmulRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (inputs[0]->requiresGrad) {
+            accumulateGrad(*inputs[0], matmulGradInput(gradientOfOutput, inputs[1]->data));
+        }
         // A weight shared by every group in a batched input collects one
         // contribution per group, so fold them back to the weight's own shape.
-        inputs[1]->grad += sumLeadingDimensions(
-            matmulGradWeight(inputs[0]->data, gradientOfOutput), inputs[1]->data.rank());
+        if (inputs[1]->requiresGrad) {
+            accumulateGrad(*inputs[1], sumLeadingDimensions(
+                matmulGradWeight(inputs[0]->data, gradientOfOutput), inputs[1]->data.rank()));
+        }
     }
 
-    void BiasAddRecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        inputs[0]->grad += gradientOfOutput;
-        inputs[1]->grad += addBiasGrad(gradientOfOutput, inputs[1]->data);
+    // The checks come first so a value that needs no gradient doesn't even
+    // get a copy of one.
+    void BiasAddRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (inputs[0]->requiresGrad) {
+            accumulateGrad(*inputs[0], gradientOfOutput);
+        }
+        if (inputs[1]->requiresGrad) {
+            accumulateGrad(*inputs[1], addBiasGrad(gradientOfOutput, inputs[1]->data));
+        }
     }
 
-    void AddRecord::sendGradBackward(const Tensor& gradientOfOutput) {
-        inputs[0]->grad += gradientOfOutput;
-        inputs[1]->grad += gradientOfOutput;
+    void AddRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (inputs[0]->requiresGrad) {
+            accumulateGrad(*inputs[0], gradientOfOutput);
+        }
+        if (inputs[1]->requiresGrad) {
+            accumulateGrad(*inputs[1], gradientOfOutput);
+        }
     }
 
     // Only the prediction gets a gradient. The target is data, so nothing
     // upstream of it can learn.
-    void LossRecord::sendGradBackward(const Tensor& gradientOfOutput) {
+    void LossRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (!inputs[0]->requiresGrad) {
+            return;
+        }
         Tensor contribution = binaryCrossEntropyGrad(inputs[0]->data, inputs[1]->data);
-        contribution = contribution * gradientOfOutput.at({0});
-        inputs[0]->grad += contribution;
+        accumulateGrad(*inputs[0], contribution * gradientOfOutput.at({0}));
     }
 
     // Same shape as LossRecord: only the scores get a gradient.
-    void SoftmaxCrossEntropyRecord::sendGradBackward(const Tensor& gradientOfOutput) {
+    void SoftmaxCrossEntropyRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (!inputs[0]->requiresGrad) {
+            return;
+        }
         Tensor contribution = softmaxCrossEntropyGrad(inputs[0]->data, inputs[1]->data);
-        contribution = contribution * gradientOfOutput.at({0});
-        inputs[0]->grad += contribution;
+        accumulateGrad(*inputs[0], contribution * gradientOfOutput.at({0}));
     }
 
     // ---- forward halves ----------------------------------------------------

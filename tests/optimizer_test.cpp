@@ -19,7 +19,7 @@ namespace {
                                  const nnet::Tensor& upstream) {
         nnet::Value inputLeaf = nnet::makeLeaf(input);
         nnet::backward(layer.forward(inputLeaf), upstream);
-        return inputLeaf->grad;
+        return inputLeaf->grad.value();
     }
 }
 

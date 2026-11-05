@@ -1,6 +1,7 @@
 #ifndef MODULE_H
 #define MODULE_H
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -48,14 +49,22 @@ namespace nnet {
 				return result;
 			}
 
-			// Clears the gradients in the models components
+			// Clears the gradients in the models components.
+			//
+			// The parameter list is found once and kept: a module's children
+			// are fixed when it's built, so the list can't change, and
+			// rebuilding it (names, hash sets) every step was most of the cost.
 			void zeroGrad() {
-                auto params = parameters();
-                for (const Parameter* param : params) {
+                if (!parametersCached_) {
+                    cachedParameters_ = parameters();
+                    parametersCached_ = true;
+                }
+                for (const Parameter* param : cachedParameters_) {
                     param->validateShape();
                 }
-                for (Parameter* param : params) {
-                    param->grad = zeros(param->value.shape());
+                for (Parameter* param : cachedParameters_) {
+                    double* grad = param->grad.data();
+                    std::fill(grad, grad + param->grad.numel(), 0.0);
                 }
 			}
 
@@ -70,6 +79,9 @@ namespace nnet {
 			}
 
 		private:
+			std::vector<Parameter*> cachedParameters_;
+			bool parametersCached_ = false;
+
 			static void validateLocalName(const std::string& name,
 			                              std::unordered_set<std::string>& names) {
 				if (name.empty() || name.find(".") != std::string::npos ||
