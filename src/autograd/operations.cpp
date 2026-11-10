@@ -89,6 +89,16 @@ namespace nnet {
         accumulateGrad(*inputs[0], contribution * gradientOfOutput.at({0}));
     }
 
+    // Only the table (inputs[1]) gets a gradient. The ids are skipped even if
+    // their leaf asks for one, since a row number has no slope.
+    void EmbeddingRecord::sendGradBackward(const Tensor& gradientOfOutput, const Tensor&) {
+        if (!inputs[1]->requiresGrad) {
+            return;
+        }
+        accumulateGrad(*inputs[1],
+            embeddingLookupGrad(inputs[0]->data, gradientOfOutput, inputs[1]->data.shape()));
+    }
+
     // ---- forward halves ----------------------------------------------------
     // Each one computes its output with the plain Tensor operation, and leaves
     // a record behind for backward. makeOutput drops the record under NoGrad.
@@ -144,5 +154,11 @@ namespace nnet {
         // A single number, carried as shape {1}.
         const double loss = softmaxCrossEntropy(scores->data, target->data);
         return makeOutput(Tensor({1}, {loss}), record);
+    }
+
+    Value embedding(const Value& ids, const Value& table) {
+        auto record = std::make_shared<EmbeddingRecord>();
+        record->inputs = {ids, table};
+        return makeOutput(embeddingLookup(table->data, ids->data), record);
     }
 }

@@ -19,6 +19,10 @@ Value addBias(const Value& input, const Value& bias);
 Value binaryCrossEntropy(const Value& prediction, const Value& target);
 Value softmaxCrossEntropy(const Value& scores, const Value& target);
 
+// Swaps each id for its table row (see embeddingLookup). Only the table
+// gets a gradient; the ids are row numbers, so they never get one.
+Value embedding(const Value& ids, const Value& table);
+
 struct AddRecord : OperationRecord {
     void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
@@ -42,6 +46,10 @@ struct LossRecord : OperationRecord {
 };
 
 struct SoftmaxCrossEntropyRecord : OperationRecord {
+    void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
+};
+
+struct EmbeddingRecord : OperationRecord {
     void sendGradBackward(const Tensor& gradientOfOutput, const Tensor& output) override;
 };
 

@@ -1,5 +1,6 @@
 #include "test_utils.h"
 #include "nnet/nn/dense.h"
+#include "nnet/nn/embedding.h"
 #include "nnet/nn/sequential.h"
 #include "nnet/core/autograd/backward.h"
 
@@ -361,6 +362,14 @@ void runNamedParameterTests(TestRunner& tests) {
         reluActivation.forward(nnet::makeLeaf(nnet::Tensor({1, 3}, {-1.0, 0.0, 2.5})))->data.getData() ==
             std::vector<double>{0.0, 0.0, 2.5},
         "ReLU module has no parameters and applies relu");
+
+    std::mt19937 embeddingGenerator(3);
+    nnet::Embedding characterTable(4, 2, embeddingGenerator);
+    const auto embeddingNames = characterTable.namedParameters();
+    tests.expectTrue(embeddingNames.size() == 1 && embeddingNames[0].name == "table" &&
+        embeddingNames[0].parameter == &characterTable.table &&
+        characterTable.table.value.shape() == nnet::Tensor::Shape{4, 2},
+        "Embedding names its one [ids, width] table");
 
     std::vector<std::unique_ptr<nnet::Unary_Module>> components;
     components.push_back(std::move(first));

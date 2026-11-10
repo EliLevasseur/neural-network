@@ -7,7 +7,6 @@ void runDenseTests(TestRunner& tests);
 void runNamedParameterTests(TestRunner& tests);
 void runAutogradTests(TestRunner& tests);
 void runTrainerTests(TestRunner& tests);
-void runMnistTests(TestRunner& tests);
 
 int main() {
     TestRunner tests;
@@ -19,7 +18,6 @@ int main() {
     runNamedParameterTests(tests);
     runAutogradTests(tests);
     runTrainerTests(tests);
-    runMnistTests(tests);
 
     return tests.finish();
 }

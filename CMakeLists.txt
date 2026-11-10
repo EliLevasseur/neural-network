@@ -1,12 +1,24 @@
 cmake_minimum_required(VERSION 3.20)
 project(neural_network LANGUAGES CXX)
 
-include(CTest)
+# Built on its own, nnet also builds its tests and examples. Pulled into another
+# project (like GLM through FetchContent), it only builds the libraries.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(NNET_IS_TOP_LEVEL ON)
+else()
+    set(NNET_IS_TOP_LEVEL OFF)
+endif()
+
+if(NNET_IS_TOP_LEVEL)
+    include(CTest)
+endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-option(NNET_BUILD_EXAMPLES "Build the reference, Tensor MLP and MNIST examples" ON)
-option(NNET_BUILD_CONNECT4 "Build the separately supplied local Connect4 example" OFF)
+# matmul splits big multiplies across std::threads
+find_package(Threads REQUIRED)
+
+option(NNET_BUILD_EXAMPLES "Build the reference and Tensor MLP examples" ${NNET_IS_TOP_LEVEL})
 option(NNET_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(NNET_ENABLE_GLIBCXX_DEBUG "Enable checked libstdc++ containers (changes ABI)" OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compiler commands for editors")
@@ -56,6 +68,7 @@ add_library(nnet_core STATIC
     src/core/tensor_ops.cpp
 )
 nnet_configure_target(nnet_core)
+target_link_libraries(nnet_core PUBLIC Threads::Threads)
 add_library(nnet::core ALIAS nnet_core)
 set_target_properties(nnet_core PROPERTIES EXPORT_NAME core)
 
@@ -78,14 +91,13 @@ set_target_properties(nnet_csv PROPERTIES EXPORT_NAME csv)
 
 add_library(nnet_data STATIC
     src/core/tensor_dataframe.cpp
-    src/data/mnist.cpp
 )
 nnet_configure_target(nnet_data)
 target_link_libraries(nnet_data PUBLIC nnet_core nnet_csv)
 add_library(nnet::data ALIAS nnet_data)
 set_target_properties(nnet_data PROPERTIES EXPORT_NAME data)
 
-if(BUILD_TESTING OR NNET_BUILD_EXAMPLES)
+if((BUILD_TESTING AND NNET_IS_TOP_LEVEL) OR NNET_BUILD_EXAMPLES)
     add_library(nnet_reference STATIC src/network.cpp src/training.cpp)
     nnet_configure_target(nnet_reference)
 endif()
@@ -99,36 +111,9 @@ if(NNET_BUILD_EXAMPLES)
     nnet_configure_target(tensor_mlp)
     target_link_libraries(tensor_mlp PRIVATE nnet_framework nnet_data)
 
-    add_executable(mnist examples/mnist.cpp)
-    nnet_configure_target(mnist)
-    target_link_libraries(mnist PRIVATE nnet_framework nnet_data)
-
 endif()
 
-if(NNET_BUILD_CONNECT4)
-    foreach(source IN ITEMS main.cpp simulations.cpp connect_four.cpp connect_four.h)
-        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/connect4/${source}")
-            message(FATAL_ERROR
-                "NNET_BUILD_CONNECT4 needs the separate examples/connect4 sources (${source} is missing). "
-                "Leave NNET_BUILD_CONNECT4=OFF to build the framework.")
-        endif()
-    endforeach()
-
-    add_executable(connect4
-        examples/connect4/main.cpp
-        examples/connect4/connect_four.cpp)
-    nnet_configure_target(connect4)
-    target_link_libraries(connect4 PRIVATE nnet_framework)
-
-    add_executable(connect4_simulations
-        examples/connect4/simulations.cpp
-        examples/connect4/connect_four.cpp)
-    nnet_configure_target(connect4_simulations)
-    target_link_libraries(connect4_simulations PRIVATE nnet_framework)
-endif()
-
-if(BUILD_TESTING)
-    find_package(Threads REQUIRED)
+if(BUILD_TESTING AND NNET_IS_TOP_LEVEL)
     add_executable(reference_tests
         tests/reference_test_main.cpp tests/network_test.cpp tests/training_test.cpp)
     target_link_libraries(reference_tests PRIVATE nnet_reference)
@@ -136,7 +121,7 @@ if(BUILD_TESTING)
     add_executable(tensor_tests
         tests/tensor_test_main.cpp tests/tensor_test.cpp tests/dataframe_test.cpp
         tests/tensor_ops_tests.cpp tests/dense_test.cpp tests/autograd_test.cpp
-        tests/trainer_test.cpp tests/mnist_test.cpp)
+        tests/trainer_test.cpp)
     target_link_libraries(tensor_tests PRIVATE nnet_framework nnet_data Threads::Threads)
 
     add_executable(parity_tests tests/parity_test_main.cpp tests/parity_test.cpp)

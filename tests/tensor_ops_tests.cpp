@@ -344,4 +344,122 @@ void runOperationTests(TestRunner& tests) {
 		nnet::sumLeadingDimensions(grouped, 3).getData() == grouped.getData(),
 		"sumLeadingDimensions leaves a tensor alone when the rank already matches");
 
+	// ---- embedding lookup -------------------------------------------------
+	// A 4-row table with 2 numbers per row, and two windows of 3 ids each.
+	const nnet::Tensor smallTable({4, 2}, { 0.1,  0.5,
+	                                       -0.3,  0.2,
+	                                        0.7, -0.4,
+	                                        0.0,  0.9});
+	const nnet::Tensor windowIds({2, 3}, {2, 0, 1,
+	                                      3, 3, 0});
+	const nnet::Tensor lookedUp = nnet::embeddingLookup(smallTable, windowIds);
+	tests.expectTrue(lookedUp.shape() == nnet::Tensor::Shape{2, 6} &&
+		lookedUp.getData() == std::vector<double>{0.7, -0.4, 0.1, 0.5, -0.3, 0.2,
+		                                          0.0,  0.9, 0.0, 0.9,  0.1, 0.5},
+		"embeddingLookup puts each window's rows side by side");
+
+	tests.expectTrue(nnet::embeddingLookup(smallTable, nnet::Tensor({2}, {3, 1})).getData() ==
+		std::vector<double>{0.0, 0.9, -0.3, 0.2},
+		"embeddingLookup works on a single window of ids");
+
+	// true when the lookup throws exactly the expected kind of error
+	auto lookupThrows = [](const nnet::Tensor& table, const nnet::Tensor& ids, bool expectOutOfRange) {
+		try {
+			(void)nnet::embeddingLookup(table, ids);
+		} catch (const std::out_of_range&) {
+			return expectOutOfRange;
+		} catch (const std::invalid_argument&) {
+			return !expectOutOfRange;
+		}
+		return false;
+	};
+	tests.expectTrue(lookupThrows(smallTable, nnet::Tensor({1}, {1.5}), false),
+		"embeddingLookup rejects an id that isn't a whole number");
+	tests.expectTrue(lookupThrows(smallTable, nnet::Tensor({1}, {std::nan("")}), false),
+		"embeddingLookup rejects a NaN id");
+	tests.expectTrue(lookupThrows(smallTable, nnet::Tensor({1}, {-1}), true),
+		"embeddingLookup rejects a negative id");
+	tests.expectTrue(lookupThrows(smallTable, nnet::Tensor({1}, {4}), true),
+		"embeddingLookup rejects an id past the last row");
+	tests.expectTrue(lookupThrows(nnet::Tensor({4}, {0, 1, 2, 3}), nnet::Tensor({1}, {0}), false),
+		"embeddingLookup rejects a table that isn't rank 2");
+
+	// Row 3 is used at positions 3 and 4, and row 0 at positions 1 and 5,
+	// so each of those rows collects two slices.
+	const nnet::Tensor lookupUpstream({2, 6}, {1, 2,  3,  4,  5,  6,
+	                                          7, 8,  9, 10, 11, 12});
+	const nnet::Tensor tableGrad = nnet::embeddingLookupGrad(windowIds, lookupUpstream, smallTable.shape());
+	tests.expectTrue(tableGrad.shape() == nnet::Tensor::Shape{4, 2} &&
+		tableGrad.getData() == std::vector<double>{14, 16, 5, 6, 1, 2, 16, 18},
+		"embeddingLookupGrad adds every slice into the row its id came from");
+
+	tests.expectTrue(nnet::embeddingLookupGrad(nnet::Tensor({1}, {2}), nnet::Tensor({2}, {5, 6}),
+		smallTable.shape()).getData() == std::vector<double>{0, 0, 0, 0, 5, 6, 0, 0},
+		"embeddingLookupGrad leaves rows that weren't looked up at 0");
+
+	// ---- the lookup is one-hot rows times the table -----------------------
+	// Multiplying a one-hot row by the table just picks out one row, so both
+	// ways must give the same numbers, forward and backward.
+	{
+		std::mt19937 parityGenerator(7);
+		const nnet::Tensor parityTable = nnet::createWeight(5, 3, parityGenerator);
+		const nnet::Tensor parityIds({2, 4}, {4, 1, 1, 0,
+		                                      2, 4, 3, 1});
+		std::vector<double> oneHotData(8 * 5, 0.0);
+		for (std::size_t position = 0; position < 8; position++) {
+			oneHotData[position * 5 + static_cast<std::size_t>(parityIds.getData()[position])] = 1.0;
+		}
+		const nnet::Tensor oneHot({8, 5}, oneHotData);
+
+		const nnet::Tensor viaMatmul = oneHot * parityTable;
+		const nnet::Tensor viaLookup = nnet::embeddingLookup(parityTable, parityIds);
+		bool forwardMatches = viaMatmul.numel() == viaLookup.numel();
+		for (std::size_t i = 0; forwardMatches && i < viaMatmul.numel(); i++) {
+			forwardMatches = std::abs(viaMatmul.getData()[i] - viaLookup.getData()[i]) <= 1.0e-12;
+		}
+		tests.expectTrue(forwardMatches, "embeddingLookup matches one-hot rows times the table");
+
+		std::uniform_real_distribution<double> gradientValues(-1.0, 1.0);
+		std::vector<double> upstreamData(8 * 3);
+		for (double& value : upstreamData) {
+			value = gradientValues(parityGenerator);
+		}
+		const nnet::Tensor gradViaMatmul = nnet::matmulGradWeight(oneHot, nnet::Tensor({8, 3}, upstreamData));
+		const nnet::Tensor gradViaLookup = nnet::embeddingLookupGrad(parityIds,
+			nnet::Tensor({2, 12}, upstreamData), parityTable.shape());
+		bool backwardMatches = gradViaMatmul.shape() == gradViaLookup.shape();
+		for (std::size_t i = 0; backwardMatches && i < gradViaMatmul.numel(); i++) {
+			backwardMatches = std::abs(gradViaMatmul.getData()[i] - gradViaLookup.getData()[i]) <= 1.0e-12;
+		}
+		tests.expectTrue(backwardMatches,
+			"embeddingLookupGrad matches the matmul weight gradient for one-hot rows");
+	}
+
+	// ---- big enough to be split across threads --------------------------
+	// Each matrix here is 256 x 512 times 512 x 256, about 33.5 million
+	// multiply-adds, which is over the cutoff in operator*. Two of them make
+	// sure every batch's rows land in the right place.
+	{
+		std::mt19937 bigGenerator(11);
+		std::uniform_real_distribution<double> bigValues(-1.0, 1.0);
+		std::vector<double> leftData(2 * 256 * 512);
+		std::vector<double> rightData(512 * 256);
+		for (double& value : leftData) {
+			value = bigValues(bigGenerator);
+		}
+		for (double& value : rightData) {
+			value = bigValues(bigGenerator);
+		}
+		const nnet::Tensor bigLeft({2, 256, 512}, leftData);
+		const nnet::Tensor bigRight({512, 256}, rightData);
+
+		const nnet::Tensor threaded = bigLeft * bigRight;
+		const nnet::Tensor reference = bigLeft.naiveMatmul(bigRight);
+		bool threadedMatches = threaded.shape() == reference.shape();
+		for (std::size_t i = 0; threadedMatches && i < threaded.numel(); i++) {
+			threadedMatches = std::abs(threaded.getData()[i] - reference.getData()[i]) <= 1.0e-9;
+		}
+		tests.expectTrue(threadedMatches, "a matmul split across threads matches the single-threaded naive matmul");
+	}
+
 }

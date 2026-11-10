@@ -1,9 +1,8 @@
 #include "../../include/nnet/core/tensor.h"
+#include <algorithm>
 #include <cstdint>
+#include <thread>
 #include <utility>
-
-// The Tensor does not currently have thourough testing for indexing COME BACK LATER
-
 
 namespace nnet {
 
@@ -81,6 +80,17 @@ std::size_t Tensor::calculateOffset(const Shape& indices) const {
 		}
 	return offset;
 	}
+
+static void multiplyData(const double* left, const double* right, double* output,std::size_t firstRow, std::size_t lastRow, std::size_t inner, std::size_t cols) {
+	for (std::size_t row = firstRow; row < lastRow; row++) {
+		for (std::size_t k = 0; k < inner; k++) {
+			const double leftValue = left[row * inner + k];
+			for (std::size_t col = 0; col < cols; col++) {
+				output[row * cols + col] += leftValue * right[k * cols + col];
+			}
+		}
+	}
+}
 //----------------------------
 
 double& Tensor::at(const Tensor::Shape& indices) {
@@ -167,24 +177,37 @@ Tensor Tensor::operator*(const Tensor& other) const {
 
     std::vector<double> values(batches * rows * cols, 0.0);
 
+	std::vector<std::thread> threads;
+	const std::size_t hardwareThreads = 16;
+	const std::size_t rowsPerThread = (rows + hardwareThreads - 1) / hardwareThreads;
 
+	// Starting 16 threads costs about 0.85 ms, so below this many multiply-adds
+	// one thread is faster. Measured on the Ryzen 9950X: a tie at 16M, threads
+	// win 1.6x at 33M and 3.3x at 67M.
+	const std::size_t minimumWorkForThreads = 32'000'000;
+	const bool useThreads = rows * inner * cols >= minimumWorkForThreads;
 
 	for (std::size_t batch = 0; batch < batches; batch++) {
 		std::size_t leftStart = batch * rows * inner;
 		std::size_t rightStart = (rightBatches == 1) ? 0 : batch * cols * inner;
 		std::size_t outputStart = batch * rows * cols;
 
-		for (std::size_t row = 0; row < rows; row++) {
-			for (std::size_t k = 0; k < inner; k++) {
-				double rvalue = data_[leftStart + row * inner + k];
-
-				for (std::size_t col = 0; col < cols; col++) {
-					double lvalue = other.data_[rightStart + k * cols + col];
-					values[outputStart + row * cols + col] += rvalue * lvalue;
-				}
-			}
-
+		if (!useThreads) {
+			multiplyData(data_.data() + leftStart, other.data_.data() + rightStart, values.data() + outputStart, 0, rows, inner, cols);
+			continue;
 		}
+
+		for (std::size_t threadIndex = 0; threadIndex < hardwareThreads; threadIndex++) {
+			std::size_t firstRow = threadIndex * rowsPerThread;
+			std::size_t lastRow = std::min(firstRow + rowsPerThread, rows);
+			if (firstRow < lastRow) {
+				threads.emplace_back(multiplyData, data_.data() + leftStart, other.data_.data() + rightStart, values.data() + outputStart, firstRow, lastRow, inner, cols);
+			}			
+		}
+		for (auto& thread : threads) {
+			thread.join();
+		}
+		threads.clear();
 	}
 
 	return Tensor(std::move(outputShape), std::move(values));

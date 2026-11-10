@@ -1,7 +1,9 @@
 #include "nnet/core/tensor_ops.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <utility>
 
 namespace nnet {
@@ -349,7 +351,61 @@ namespace nnet {
 		return Tensor({numInputs, numOutputs}, weightData);
 	}
 
-	
+	// EMBEDDING
+	static std::vector<std::size_t> rowsForIds(const Tensor& ids, std::size_t tableRows) {
+		std::vector<std::size_t> rows(ids.numel());
+		const double* idData = ids.data();
+		for (std::size_t i = 0; i < rows.size(); i++) {
+			const double id = idData[i];
+			// also catches NaN, which fails every comparison and would slip past the range check
+			if (!(std::floor(id) == id)) {
+				throw std::invalid_argument("Embedding ids must be whole numbers");
+			}
+			if (id < 0.0 || id >= static_cast<double>(tableRows)) {
+				throw std::out_of_range("Embedding id is outside the table");
+			}
+			rows[i] = static_cast<std::size_t>(id);
+		}
+		return rows;
+	}
+
+	static Tensor::Shape lookupShape(const Tensor::Shape& idShape, std::size_t width) {
+		Tensor::Shape shape = idShape;
+		shape.back() *= width;
+		return shape;
+	}
+
+	Tensor embeddingLookup(const Tensor& table, const Tensor& ids) {
+		if (table.rank() != 2) {
+			throw std::invalid_argument("embeddingLookup needs a rank-2 table");
+		}
+		const std::size_t width = table.shape()[1];
+		const std::vector<std::size_t> rows = rowsForIds(ids, table.shape()[0]);
+
+		std::vector<double> output(rows.size() * width);
+		const double* tableData = table.data();
+		// position p's row lands at p * width, so a window's rows end up side by side
+		for (std::size_t position = 0; position < rows.size(); position++) {
+			const double* rowStart = tableData + rows[position] * width;
+			std::copy(rowStart, rowStart + width, output.begin() + position * width);
+		}
+		return Tensor(lookupShape(ids.shape(), width), std::move(output));
+	}
+
+	Tensor embeddingLookupGrad(const Tensor& ids, const Tensor& upstreamGrad, const Tensor::Shape& tableShape) {
+		const std::size_t width = tableShape[1];
+		const std::vector<std::size_t> rows = rowsForIds(ids, tableShape[0]);
+
+		std::vector<double> tableGrad(tableShape[0] * width, 0.0);
+		const double* upstream = upstreamGrad.data();
+		for (std::size_t position = 0; position < rows.size(); position++) {
+			// added, not copied: an id used twice collects both slices
+			for (std::size_t k = 0; k < width; k++) {
+				tableGrad[rows[position] * width + k] += upstream[position * width + k];
+			}
+		}
+		return Tensor(tableShape, std::move(tableGrad));
+	}
 
 }
 

@@ -176,7 +176,26 @@ void runAutogradTests(TestRunner& tests) {
             "softmax cross-entropy passes back the gradient it receives");
     }
 
-    // ---- the MNIST network in miniature: Dense, ReLU, Dense, loss ---------
+    // ---- embedding -----------------------------------------------------------
+    // A sigmoid on top makes every slice of the incoming gradient different.
+    // Id 1 shows up twice, so its row has to collect both slices.
+    {
+        const nnet::Tensor ids({2, 2}, {1, 0,
+                                        1, 2});
+        nnet::Value table = nnet::makeLeaf(nnet::Tensor({3, 2}, { 0.3, -0.8,
+                                                                  1.2,  0.4,
+                                                                 -0.5,  0.9}));
+        // left asking for a gradient on purpose: the record must still skip it
+        nnet::Value idLeaf = nnet::makeLeaf(ids);
+        nnet::backward(nnet::sigmoid(nnet::embedding(idLeaf, table)));
+        expectGradientMatches(tests, table,
+            [&](const nnet::Tensor& t) { return sumOf(nnet::sigmoid(nnet::embeddingLookup(t, ids))); },
+            "embedding table gradient matches a finite difference");
+        tests.expectTrue(!idLeaf->grad.has_value(),
+            "embedding never gives the ids a gradient");
+    }
+
+    // ---- a small classifier: Dense, ReLU, Dense, loss ---------------------
     // Two examples, three inputs, four hidden units, three classes. Every
     // hidden pre-activation is at least 0.12 away from zero, where ReLU bends.
     {

@@ -1,6 +1,7 @@
 #include "test_utils.h"
 #include "nnet/train/trainer.h"
 #include "nnet/nn/dense.h"
+#include "nnet/nn/embedding.h"
 #include "nnet/nn/sequential.h"
 #include "nnet/core/autograd/backward.h"
 #include "nnet/core/autograd/operations.h"
@@ -384,5 +385,52 @@ void runTrainerTests(TestRunner& tests) {
 
         std::filesystem::remove(path);
         std::filesystem::remove(brokenPath);
+    }
+
+    // ---- a model that starts with an Embedding ------------------------------
+    // Each id should predict the next one, wrapping around: 0->1, 1->2, 2->3, 3->0.
+    {
+        std::vector<double> idValues;
+        std::vector<double> nextIdValues;
+        for (int repeat = 0; repeat < 5; ++repeat) {
+            for (int id = 0; id < 4; ++id) {
+                idValues.push_back(id);
+                for (int next = 0; next < 4; ++next) {
+                    nextIdValues.push_back(next == (id + 1) % 4 ? 1.0 : 0.0);
+                }
+            }
+        }
+        const nnet::Tensor ids({20, 1}, idValues);
+        const nnet::Tensor nextIds({20, 4}, nextIdValues);
+
+        auto buildEmbeddingModel = [](unsigned int seed) {
+            std::mt19937 weightGenerator(seed);
+            std::vector<std::unique_ptr<nnet::Unary_Module>> layers;
+            layers.push_back(std::make_unique<nnet::Embedding>(4, 3, weightGenerator));
+            layers.push_back(std::make_unique<nnet::Dense>(3, 4, weightGenerator));
+            return std::make_unique<nnet::Sequential>(std::move(layers));
+        };
+
+        auto model = buildEmbeddingModel(5);
+        nnet::AdamOptimizer adam(model->parameters(), 0.05);
+        std::mt19937 shuffleGenerator(6);
+        for (int epoch = 0; epoch < 50; ++epoch) {
+            nnet::trainEpoch(*model, ids, nextIds, 4, adam, nnet::softmaxCrossEntropy, shuffleGenerator);
+        }
+        tests.expectNear(nnet::accuracy(*model, ids, nextIds), 1.0, 1.0e-12,
+            "a model that starts with an Embedding learns which id comes next");
+
+        const std::string embeddingPath =
+            (std::filesystem::temp_directory_path() / "nnet_test_embedding_checkpoint.bin").string();
+        nnet::saveParameters(*model, embeddingPath);
+        auto reloaded = buildEmbeddingModel(77);
+        nnet::loadParameters(*reloaded, embeddingPath);
+        {
+            nnet::NoGrad noGrad;
+            tests.expectTrue(model->forward(nnet::makeLeaf(ids))->data.getData() ==
+                reloaded->forward(nnet::makeLeaf(ids))->data.getData(),
+                "a saved Embedding model loads back and predicts exactly the same");
+        }
+        std::filesystem::remove(embeddingPath);
     }
 }

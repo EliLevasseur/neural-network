@@ -50,6 +50,16 @@ namespace nnet {
     // averaged over rows, like binaryCrossEntropy.
     double softmaxCrossEntropy(const Tensor& scores, const Tensor& targets);
     Tensor softmaxCrossEntropyGrad(const Tensor& scores, const Tensor& targets);
+
+    // EMBEDDING FEATURES
+    // `table` is [rows, width]. `ids` holds whole numbers from 0 to rows - 1,
+    // stored as doubles, and its last axis is one window of ids. Each id is
+    // swapped for its table row, so ids [..., C] give [..., C * width].
+    // Throws if an id isn't a whole number or falls outside the table.
+    Tensor embeddingLookup(const Tensor& table, const Tensor& ids);
+    // The table's gradient. Each width-long slice of `upstreamGrad` is added
+    // into the row its id came from, so an id used twice collects both.
+    Tensor embeddingLookupGrad(const Tensor& ids, const Tensor& upstreamGrad, const Tensor::Shape& tableShape);
 }
 
 #endif

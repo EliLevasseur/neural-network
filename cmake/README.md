@@ -1,143 +1,161 @@
 # Building with CMake
 
-Run these commands from the repository root inside FedoraLinux-44 WSL.
-CMake 3.20+, GNU Make, and GCC with C++17 support are sufficient. The presets
-select `g++`; they do not require Ninja or download dependencies.
+You need CMake 3.20 or newer, GNU Make, and a C++17 compiler. I build and test
+with GCC on Fedora under WSL; other compilers and platforms haven't been checked
+yet. Nothing gets downloaded when you build nnet itself. Run the commands below
+from the repository root.
 
-## Build and test
-
-```bash
-cmake --preset debug
-cmake --build --preset debug
-ctest --preset debug
-```
-
-CMake configures targets, the build command compiles/links them, and CTest runs
-the existing test programs. Four CTest entries contain 415 individual checks:
-reference (36), Tensor/framework (229), parity (104), and optimizer (46).
-
-| Preset | Purpose | Directory |
-|---|---|---|
-| debug | GCC, -g3 -O0 | build/cmake-debug |
-| checked | Debug with checked libstdc++ containers | build/cmake-checked |
-| release | GCC, -O2 -DNDEBUG | build/cmake-release |
-| asan | Debug with AddressSanitizer and UndefinedBehaviorSanitizer | build/cmake-asan |
-
-Replace `debug` with another name in all three commands. Sanitizers require
-the compiler's ASan/UBSan runtime libraries. Presets build with two jobs; override
-with `cmake --build --preset debug --parallel 4` if desired.
-
-The checked preset changes the standard-library ABI. Its definitions propagate
-through library targets so consumers use the same layout. Sanitizer runtime link
-options propagate too. Use separate build directories for different modes.
-
-Each build contains `compile_commands.json` for editor tooling. Optional local
-overrides belong in the ignored `CMakeUserPresets.json`.
-
-## Targets and dependencies
-
-| Target | Purpose / dependency |
-|---|---|
-| nnet_core / nnet::core | Tensor and numerical operations |
-| nnet_framework / nnet::framework | Autograd, optimizers and trainer; uses core |
-| nnet_csv / nnet::csv | Tensor-independent DataFrame CSV reader |
-| nnet_data / nnet::data | Tensor/DataFrame adapter and MNIST loader; uses core and CSV |
-| nnet_reference | Frozen Network/Trainer oracle; not installed |
-| reference_mlp | Reference executable; uses reference and CSV only |
-| tensor_mlp, mnist | Framework examples; use framework and data |
-| reference_tests, tensor_tests, parity_tests, optimizer_tests | Existing suites |
-
-Parameter, Module, Dense, Sequential and checkpoint implementations live in
-headers. They are installed with the framework and compile in consumers.
-
-The `PUBLIC` requirements pass headers, C++17, and necessary dependency/ABI
-settings to consumers. Warnings are `PRIVATE`, so your warning policy is not
-imposed on another project. Sources are listed explicitly to preserve boundaries.
-
-To build only the reference oracle, without compiling Tensor or autograd:
-
-```bash
-cmake --build --preset debug --target reference_mlp reference_tests
-ctest --preset debug -R '^reference$'
-```
-
-CTest copies the small CSV fixture into the build directory and assigns a
-separate temporary directory per suite/build. Tests do not need downloaded MNIST
-or the shell's working directory to be the source tree.
-
-## Run examples
-
-Examples read relative dataset paths, so run them from the repository root.
-Use Release for full training; CMake's Debug MNIST build stays unoptimized.
+## Quick start
 
 ```bash
 cmake --preset release
 cmake --build --preset release
-./build/cmake-release/reference_mlp
+ctest --preset release
 ./build/cmake-release/tensor_mlp
-make mnist-data
-./build/cmake-release/mnist
 ```
 
-Downloading MNIST remains an explicit existing Make target. Configuring,
-compiling, and testing never download or train on the full dataset.
-The original Makefile and its commands still work independently.
+That configures the build, compiles everything, runs the tests, and trains the
+small example model. The tests are four programs with 420 checks between them:
+the old reference model on its own (36), the Tensor framework (234), the
+framework compared against the reference model (104), and the optimizers (46).
 
-Connect4 lives in a separate local repository under `examples/connect4/`; it
-is not supplied by a framework checkout. Its optional targets default to off.
-If those sources are present locally, enable and build them explicitly:
+## Build modes
 
-```bash
-cmake --preset release -DNNET_BUILD_CONNECT4=ON
-cmake --build --preset release --target connect4 connect4_simulations
+Each preset builds into its own folder, so you can keep several around at once.
+Swap the name in the first three commands above to use a different one.
+
+| Preset | What it's for | Folder |
+|---|---|---|
+| debug | Stepping through code: `-g3 -O0` | build/cmake-debug |
+| release | Training and timing: `-O2 -DNDEBUG` | build/cmake-release |
+| checked | Debug, plus libstdc++ checks on every container access | build/cmake-checked |
+| asan | Debug, plus AddressSanitizer and UndefinedBehaviorSanitizer | build/cmake-asan |
+
+`checked` and `asan` are slower, but they catch out-of-bounds reads and other
+memory bugs that a normal build can quietly get away with. `checked` changes the
+standard library's layout, so anything linked against a checked build has to be
+built the same way. The sanitizers need the compiler's ASan and UBSan runtime
+libraries installed.
+
+Every build folder gets a `compile_commands.json` for editors. If you want your
+own presets, put them in `CMakeUserPresets.json`, which git ignores.
+
+## Using nnet in your own project
+
+There are two ways to do it.
+
+### Let CMake download it
+
+Add this to your project's `CMakeLists.txt`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(nnet
+    GIT_REPOSITORY https://github.com/EliLevasseur/neural-network.git
+    GIT_TAG v0.2.0)
+FetchContent_MakeAvailable(nnet)
+
+target_link_libraries(your_program PRIVATE nnet::framework)
 ```
 
-Use `-DNNET_BUILD_CONNECT4=OFF` to turn them off again. The three framework
-examples above remain controlled by `NNET_BUILD_EXAMPLES`.
+CMake clones nnet the first time you configure and builds it along with your
+program. Pulled in this way, nnet only builds its libraries, not its own tests
+or examples. `GIT_TAG` pins the version, so a later change to nnet can't break
+your build. To build against a local clone instead, for example while you're
+changing nnet itself, configure with
+`-DFETCHCONTENT_SOURCE_DIR_NNET=/path/to/neural-network`.
+[GLM](https://github.com/EliLevasseur/LLM) is set up this way.
 
-## Install and use from another project
+### Install it once
 
 ```bash
 cmake --preset release
 cmake --build --preset release
-cmake --install build/cmake-release --prefix "$PWD/build/cmake-install"
-
-cmake -S tests/cmake/consumer -B build/cmake-consumer \
-  -DCMAKE_CXX_COMPILER=g++ \
-  -DCMAKE_PREFIX_PATH="$PWD/build/cmake-install"
-cmake --build build/cmake-consumer
-ctest --test-dir build/cmake-consumer --output-on-failure
+cmake --install build/cmake-release --prefix $HOME/libs/nnet
 ```
 
-The consumer is an independent CMake project. It uses only:
+Then in your project:
 
 ```cmake
 find_package(nnet CONFIG REQUIRED)
 target_link_libraries(your_program PRIVATE nnet::framework)
 ```
 
-Link `nnet::data` as well when using the loaders. CMake supplies transitive
-libraries and installed header paths. The install tree can be relocated;
-no source-checkout path is exported. This is local package support, not a
-published release or a cross-platform binary compatibility promise.
+and configure it with `-DCMAKE_PREFIX_PATH=$HOME/libs/nnet` so CMake can find
+it. The install folder can be moved afterwards; it doesn't point back at the
+source checkout.
 
-For a library-only build:
+### Which library to link
+
+- `nnet::framework` is what most programs want: tensors, the operations,
+  autograd, the layers, the optimizers and the trainer.
+- `nnet::data` adds `DataFrame` to Tensor conversion, for loading CSV files.
+- `nnet::core` is just `Tensor` and the plain operations, without autograd.
+- `nnet::csv` is just the `DataFrame` CSV reader, with no Tensor code at all.
+
+Linking one brings in what it depends on, including the C++17 setting, the
+header paths and the threads library matmul uses. The layers (`Dense`,
+`Embedding`, `Sequential` and the rest) and checkpoints are header-only, so they
+compile as part of your program. nnet's warning flags stay inside nnet and
+don't get forced on your code.
+
+Training goes almost twice as fast if everything is compiled for your own CPU,
+by adding `-march=native`. The catch is that the programs then only run on CPUs
+like yours.
+
+## Other builds
+
+Only the frozen reference model, without compiling any Tensor or autograd code:
 
 ```bash
-cmake -S . -B build/cmake-library -DCMAKE_CXX_COMPILER=g++ \
-  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DNNET_BUILD_EXAMPLES=OFF
+cmake --build --preset debug --target reference_mlp reference_tests
+ctest --preset debug -R '^reference$'
+```
+
+Only the libraries, with no tests or examples:
+
+```bash
+cmake -S . -B build/cmake-library -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DNNET_BUILD_EXAMPLES=OFF
 cmake --build build/cmake-library
 ```
 
-## Verification scope
+To check that an installed copy works from a separate project, there's a small
+one in `tests/cmake/consumer` that runs a Dense layer forward, backward and
+through an optimizer step:
 
-Verified on FedoraLinux-44 WSL with GCC: all four suites in all four presets,
-all example builds, a reference-only build, a library-only build, and a copied
-consumer project using a relocated installation. The consumer checks a Dense
-forward, autograd backward, and optimizer update through installed headers/libs.
+```bash
+cmake --install build/cmake-release --prefix "$PWD/build/cmake-install"
+cmake -S tests/cmake/consumer -B build/cmake-consumer -DCMAKE_PREFIX_PATH="$PWD/build/cmake-install"
+cmake --build build/cmake-consumer
+ctest --test-dir build/cmake-consumer --output-on-failure
+```
 
-Hosted CI and a Clang run are still M6 work. No other platform has been verified.
+The examples read their data with relative paths, so run them from the
+repository root. The original Makefile still works on its own as well.
 
-CMake references: [targets and usage requirements](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html),
+## What's in the build
+
+- Libraries: `nnet_core`, `nnet_framework`, `nnet_csv`, `nnet_data`. These get
+  installed, and each has a `nnet::` name for other projects to use.
+- `nnet_reference`: the frozen reference model. It's only used by the tests and
+  `reference_mlp`, and isn't installed.
+- Examples: `reference_mlp` and `tensor_mlp`. They're controlled by
+  `NNET_BUILD_EXAMPLES`, which is on when nnet is built by itself and off when
+  another project pulls it in.
+- Tests: `reference_tests`, `tensor_tests`, `parity_tests` and
+  `optimizer_tests`. Each runs in its own temporary folder, and none of them need
+  downloaded data.
+
+## What's been checked
+
+On Fedora WSL with GCC 16: all four test programs in all four presets, the
+examples, the reference-only and library-only builds, the consumer project
+against a moved install folder, and a separate project pulling nnet in with
+FetchContent from a local clone. There's no hosted CI or Clang run yet, and
+nothing has been tried on other platforms.
+
+CMake docs:
+[targets and usage requirements](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html),
 [presets](https://cmake.org/cmake/help/v3.20/manual/cmake-presets.7.html),
-[installation and exports](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html).
+[FetchContent](https://cmake.org/cmake/help/latest/module/FetchContent.html),
+[installing and exporting](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html).

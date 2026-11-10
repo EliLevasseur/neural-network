@@ -12,14 +12,14 @@ when the newer code produces a number, I check it against what this model
 produces for the same weights and input.
 
 The second is the actual framework, built around a `Tensor` type. It has components
-(`Dense`, `ReLU`, `Sigmoid`, `Sequential`), parameters tied to gradients, SGD, momentum and Adam
-optimizers, and automatic differentiation, so a model can be trained without writing its backward
-pass by hand.
+(`Dense`, `Embedding`, `ReLU`, `Sigmoid`, `Sequential`), parameters tied to gradients, SGD,
+momentum and Adam optimizers, and automatic differentiation, so a model can be trained without
+writing its backward pass by hand.
 
 ## Where things stand
 
-Both examples split a validation set off their training data, watch it during
-training, and only evaluate the test set once at the end. The fixed-fixture
+The `tensor_mlp` example splits a validation set off its training data, watches
+it during training, and only evaluates the test set once at the end. The fixed-fixture
 parity tests still compare the framework's forward and backward calculations
 with the reference model.
 
@@ -27,7 +27,7 @@ with the reference model.
 
 ```text
 make test-reference   36 checks   the old MLP on its own, no tensor code linked
-make test-tensor     229 checks   Tensor, operations, layers, autograd, training, MNIST loading, checkpoints
+make test-tensor     234 checks   Tensor, operations, layers, autograd, training, checkpoints
 make test-parity     104 checks   the framework compared against the old MLP
 ```
 
@@ -53,8 +53,7 @@ ctest --preset debug
 ```
 
 CMake builds reusable libraries and separate examples/tests. CTest runs all four
-suites, including the optimizer checks: 415 checks in total. The reference
-executable remains independent of Tensor/autograd.
+suites, including the optimizer checks: 420 checks in total.
 
 Use `checked`, `release`, or `asan` in place of `debug` for checked libstdc++,
 optimized training, or AddressSanitizer/UndefinedBehaviorSanitizer. Build
@@ -64,13 +63,7 @@ directories are separate and each includes `compile_commands.json`.
 cmake --preset release
 cmake --build --preset release
 ./build/cmake-release/tensor_mlp
-make mnist-data
-./build/cmake-release/mnist
 ```
-
-Run examples from the repository root so their relative dataset paths resolve.
-Use Release for MNIST; the CMake Debug build deliberately stays unoptimized.
-Builds and tests do not download datasets.
 
 See [the CMake guide](cmake/README.md) for targets, presets, installation, and a
 separate example project that links the installed framework using
@@ -83,8 +76,6 @@ make                 # builds build/reference_mlp
 make run             # runs the old reference model
 make test            # reference, Tensor and parity suites
 make tensor-mlp      # trains the tensor-based model
-make mnist-data      # downloads MNIST and checks its checksums
-make mnist           # trains the digit classifier (built with -O2)
 make graph           # plots the reference model's training loss
 ```
 
@@ -95,28 +86,46 @@ builds are verified locally. Hosted CI and Clang verification remain pending.
 
 ## Training a model
 
-This is roughly what `examples/mnist.cpp` does:
+This is roughly what `examples/tensor_mlp.cpp` does. It trains a small binary
+classifier on a CSV file with 8 input columns:
 
 ```cpp
+DataFrame data("data/complex_8d_test.csv", 8);
+const splitContainer split = data.trainTestSplit(0.8, 42);
+
+// a validation set comes out of the training rows, not the test rows
+std::mt19937 validationGenerator(42);
+nnet::TrainValidationSplit train = nnet::splitOffValidation(
+    data.flatten(split.XTrain), nnet::Tensor({split.yTrain.size(), 1}, split.yTrain),
+    split.yTrain.size() / 5, validationGenerator);
+
 std::mt19937 weightGenerator(42);
 std::vector<std::unique_ptr<nnet::Unary_Module>> layers;
-layers.push_back(std::make_unique<nnet::Dense>(784, 128, weightGenerator));
-layers.push_back(std::make_unique<nnet::ReLU>());
-layers.push_back(std::make_unique<nnet::Dense>(128, 10, weightGenerator));
+layers.push_back(std::make_unique<nnet::Dense>(8, 6, weightGenerator));
+layers.push_back(std::make_unique<nnet::Sigmoid>());
+layers.push_back(std::make_unique<nnet::Dense>(6, 4, weightGenerator));
+layers.push_back(std::make_unique<nnet::Sigmoid>());
+layers.push_back(std::make_unique<nnet::Dense>(4, 1, weightGenerator));
+layers.push_back(std::make_unique<nnet::Sigmoid>());
 nnet::Sequential model(std::move(layers));
 
-std::mt19937 splitGenerator(42);
-nnet::TrainValidationSplit train = nnet::splitOffValidation(mnist.images, mnist.labels, 10000, splitGenerator);
-
-nnet::SGDOptimizer optimizer(model.parameters(), 0.1);
+nnet::SGDOptimizer optimizer(model.parameters(), 0.5);
 std::mt19937 shuffleGenerator(42);
-for (int epoch = 0; epoch < epochs; epoch++) {
-    double trainingLoss = nnet::trainEpoch(model, train.trainInputs, train.trainTargets, 64, optimizer,
-                                           nnet::softmaxCrossEntropy, shuffleGenerator);
-    double validationAccuracy = nnet::accuracy(model, train.validationInputs, train.validationTargets);
+for (int epoch = 0; epoch < 10; epoch++) {
+    double trainingLoss = nnet::trainEpoch(model, train.trainInputs, train.trainTargets, 1, optimizer,
+                                           nnet::binaryCrossEntropy, shuffleGenerator);
+    double validationLoss = nnet::evaluateLoss(model, train.validationInputs, train.validationTargets,
+                                               nnet::binaryCrossEntropy);
 }
-double testAccuracy = nnet::accuracy(model, test.images, test.labels);
+
+const nnet::Tensor testInputs = data.flatten(split.XTest);
+const nnet::Tensor testTargets({split.yTest.size(), 1}, split.yTest);
+double testAccuracy = nnet::accuracy(model, testInputs, testTargets);
 ```
+
+For more than two classes, end with a `Dense` layer that has one output per
+class and no activation, use one-hot targets, and train with
+`nnet::softmaxCrossEntropy` instead.
 
 Swapping `SGDOptimizer` for `MomentumOptimizer` or `AdamOptimizer` is the only
 change needed to train with those instead.
@@ -126,8 +135,8 @@ step per batch. Written out by hand, one step is:
 
 ```cpp
 model.zeroGrad();
-nnet::Value scores = model.forward(nnet::makeLeaf(batchImages));
-nnet::backward(nnet::softmaxCrossEntropy(scores, nnet::makeLeaf(batchLabels)));
+nnet::Value prediction = model.forward(nnet::makeLeaf(batchInputs, false));
+nnet::backward(nnet::binaryCrossEntropy(prediction, nnet::makeLeaf(batchTargets, false)));
 optimizer.step();
 ```
 
@@ -136,7 +145,7 @@ To evaluate without building a graph, wrap the forward pass in `nnet::NoGrad`:
 ```cpp
 {
     nnet::NoGrad noGrad;
-    nnet::Value prediction = model.forward(nnet::makeLeaf(test.images));
+    nnet::Value prediction = model.forward(nnet::makeLeaf(testInputs));
 }
 ```
 
@@ -144,52 +153,58 @@ A trained model can be saved and loaded again. The file only holds the numbers,
 so the model has to be built the same way in code before loading:
 
 ```cpp
-nnet::saveParameters(model, "mnist.ckpt");
-nnet::loadParameters(model, "mnist.ckpt");
+nnet::saveParameters(model, "model.ckpt");
+nnet::loadParameters(model, "model.ckpt");
 ```
 
 ## How it's put together
 
-**Tensor** (`include/nnet/core/tensor.h`) owns a contiguous, row-major block of
-`double` with a shape and strides. Indexing with `at()` is bounds-checked, and
-copies are always deep. There are no views and no broadcasting.
+A `Tensor` (`include/nnet/core/tensor.h`) owns a flattened n dimensional matrix of
+`double` with a shape and strides. Indexing with `at()` works instead of indexing
+the data directly, and copies are always deep. Matrix multiply splits its rows across
+16 threads once a single multiply reaches 32 million multiply-adds. Below that it stays
+on one thread.
 
-**Operations** (`include/nnet/core/tensor_ops.h`) are free functions on Tensors:
+The operations (`include/nnet/core/tensor_ops.h`) are free functions on Tensors:
 matrix multiply, bias add, sigmoid, ReLU, softmax, binary and softmax
-cross-entropy, transpose, and a few more. Each differentiable one has a matching gradient function that's checked
-against finite differences. Leading dimensions are treated as batch dimensions,
-so the same operations work on a single row or a stack of matrices.
+cross-entropy, transpose, embedding lookup, and a few more. Each differentiable
+one has a matching gradient function.
+Leading dimensions are treated as batch dimensions, so the same operations work
+on a single row or a stack of matrices.
 
-**Autograd** (`include/nnet/core/autograd/`) wraps a Tensor in a `Value`. Every
+Autograd (`include/nnet/core/autograd/`) wraps a Tensor in a `Value`. Every
 operation on Values leaves behind a small record of what it did and what it was
 given. `backward(loss)` walks those records from the loss back to the inputs and
 fills in each gradient. A graph can only be used for one backward pass, and
-calling it a second time throws rather than counting the gradients twice.
+calling it a second time throws an error rather than counting the gradients twice.
 
-**Layers** (`include/nnet/nn/`) are built on top of autograd. A `Parameter` holds
+Layers (`include/nnet/nn/`) are built on top of autograd. A `Parameter` holds
 a value and its gradient together. `Dense` owns a weight and a bias, with the
 weight's starting values drawn from a seeded generator (He initialization).
-`Sigmoid` and `ReLU` have no parameters, and `Sequential` chains layers. Layers don't have backward
-methods at all; autograd handles that from the operations they use. When
-`backward` finishes, each layer's gradients end up in its Parameters, where the
-optimizer reads them.
+`Embedding` owns a table with one learned row per id. Its input is ids stored as
+whole numbers in a normal Tensor, and it swaps each one for its row, which
+gives the same numbers as multiplying one-hot rows by the table without all the
+multiplications by zero. `Sigmoid` and `ReLU` have no parameters, and
+`Sequential` chains layers together. Layers don't have backward methods at all; autograd
+handles that from the operations they use. When `backward` finishes, each
+layer's gradients end up in its Parameters, where the optimizer reads them.
 
-**Optimizers** (`include/nnet/optim/optimizer.h`) all share one small
+The optimizers (`include/nnet/optim/optimizer.h`) all share one small
 `Optimizer` base class with a `step()`. SGD, momentum and Adam each keep
 whatever they need between steps (momentum a velocity per weight, Adam a
 velocity and an average of squared gradients), and skip frozen parameters.
 
-**Training** (`include/nnet/train/trainer.h`) is a few plain functions.
+Training (`include/nnet/train/trainer.h`) is a few plain functions.
 `trainEpoch` does one shuffled pass over the data in mini-batches with any
 optimizer, `splitOffValidation` sets aside a validation set, and
 `evaluateLoss` and `accuracy` measure a model without building a graph. They
 take inputs and targets as Tensors, so they don't care where the data came
-from: `loadMnist` (`include/nnet/data/mnist.h`) reads the MNIST files into
-Tensors, and `DataFrame` does the same for CSV files. Nothing has to go
+from: `DataFrame` reads CSV files and flattens them into Tensors, and GLM
+builds its own batches straight from text. Nothing has to go
 through the trainer, though. A model that doesn't fit it can call `forward`,
 `backward` and `step()` itself.
 
-**Checkpoints** (`include/nnet/nn/checkpoint.h`) save each parameter's name,
+Checkpoints (`include/nnet/nn/checkpoint.h`) save each parameter's name,
 shape and values to a binary file, and refuse to load a file that doesn't
 match the model.
 
@@ -208,9 +223,8 @@ Trainer trainer(network, 0.09);
 trainer.fit(1000, split.XTrain, split.yTrain);
 ```
 
-It's only been tested against the fixtures in this repo. It doesn't validate
-input files or shapes carefully, and some of its checks are `assert`s that
-disappear in a release build, so it isn't meant for general use.
+It's only been tested against the fixtures in this repo. 
+There are many loose ends in this reference project so it isn't meant for general use.
 
 ## Platform notes
 
@@ -220,37 +234,9 @@ Visual Studio build for Windows. There are two things to know before that:
 The Makefile assumes a Unix shell (`mkdir -p`, `./build/...`), so `make` won't
 run from `cmd.exe`.
 
-The tensor framework draws its starting weights from a seeded `std::mt19937`,
-the same way the train/test split in `DataFrame` works, so a run starts from
-the same weights every time. The legacy reference model still uses
-`rand() / RAND_MAX`, because its output is the baseline everything else gets
-checked against. On Linux and macOS `RAND_MAX` is 2147483647, but on MSVC it's
-only 32767, so that model's starting weights would be much coarser on Windows.
+## Reference Implementations
+[GLM](https://github.com/EliLevasseur/LLM) a small character-level language model trained on TinyStories.
 
-The loss graph (`make graph`) needs matplotlib and a desktop session. It works
-on macOS out of the box and on Linux with a display (WSLg under WSL).
+## License
 
-## Performance measurements
-
-Run a comparison against `main` (or another commit):
-
-```bash
-CXX=g++ ./scripts/benchmarks.sh main -t "Optimization branch" -m "My PC / Fedora WSL"
-```
-
-Each successful run appends a dated machine entry under that test title in
-[the performance log](info/PERFORMANCE.md), retaining raw samples and source
-evidence in `info/benchmark-runs/`. Python 3 is required for report validation.
-The November 5 comparison improved dense-layer multiplication and small-MLP
-training, but regressed the 100×100 case; see the log for measured tradeoffs.
-
-## What's next
-
-- Use the recorded CPU measurements to guide future performance work.
-- More layer types and losses than the ones I have so far.
-
-Longer term, I want this to be a core that can support quite different kinds of
-models (language, vision, games, quantitative work) sharing the same operations
-and layers, instead of being forced into one inheritance tree. Getting the old
-binary classifier to train through it was a checkpoint on the way there, not the
-goal.
+MIT, see [LICENSE](LICENSE).
