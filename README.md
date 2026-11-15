@@ -235,7 +235,7 @@ The Makefile assumes a Unix shell (`mkdir -p`, `./build/...`), so `make` won't
 run from `cmd.exe`.
 
 ## Reference Implementations
-[GLM](https://github.com/EliLevasseur/LLM) a small character-level language model trained on TinyStories.
+[GLM](https://github.com/EliLevasseur/glm) a small character-level language model trained on TinyStories.
 
 ## License
 

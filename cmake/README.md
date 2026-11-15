@@ -64,7 +64,7 @@ or examples. `GIT_TAG` pins the version, so a later change to nnet can't break
 your build. To build against a local clone instead, for example while you're
 changing nnet itself, configure with
 `-DFETCHCONTENT_SOURCE_DIR_NNET=/path/to/neural-network`.
-[GLM](https://github.com/EliLevasseur/LLM) is set up this way.
+[GLM](https://github.com/EliLevasseur/glm) is set up this way.
 
 ### Install it once
 
