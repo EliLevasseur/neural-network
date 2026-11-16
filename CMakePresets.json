@@ -47,6 +47,15 @@
       }
     },
     {
+      "name": "native",
+      "displayName": "GCC Release for this CPU, same flags as GLM",
+      "inherits": "gcc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -march=native -DNDEBUG"
+      }
+    },
+    {
       "name": "asan",
       "displayName": "GCC Debug with ASan and UBSan",
       "inherits": "debug",
@@ -69,6 +78,11 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "jobs": 2
+    },
+    {
+      "name": "native",
+      "configurePreset": "native",
       "jobs": 2
     },
     {
@@ -101,6 +115,16 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "native",
+      "configurePreset": "native",
       "output": {
         "outputOnFailure": true
       },

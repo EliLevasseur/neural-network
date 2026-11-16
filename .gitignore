@@ -5,3 +5,5 @@ ROADMAP.md
 CLAUDE.md
 env/
 CMakeUserPresets.json
+.claude/
+amtmul_benchmark
